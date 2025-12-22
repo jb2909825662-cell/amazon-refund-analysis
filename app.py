@@ -12,7 +12,7 @@ import csv
 # ================== 🛠️ 【配置区域】 请在这里修改 ==================
 
 # 1. 硅基流动 API Key (必填)
-SILICONFLOW_API_KEY = "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
+SILICONFLOW_API_KEY = "sk-wmbipxzixpvwddjoisctfpsdwneznyliwoxgxbbzcdrvaiye" 
 
 # 2. AI 模型选择
 MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
@@ -378,4 +378,5 @@ if user_name and user_dept:
                         mime="text/html"
                     )
 else:
+
     st.warning("👈 请先在左侧侧边栏填写【姓名】和【部门】，即可开始使用工具。")
