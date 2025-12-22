@@ -179,20 +179,24 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map):
 # ================== UI 主逻辑 ==================
 st.title("🤖 Amazon 退款智能分析 (Pro)")
 
-st.sidebar.header("👤 用户信息登记")
-st.sidebar.info("请先填写下方信息，才能进行分析操作。")
+# ====== 用户信息和管理员日志左右两列显示 ======
+col1, col2 = st.columns([1, 1])
 
-if 'user_name' not in st.session_state: st.session_state.user_name = ""
-if 'user_dept' not in st.session_state: st.session_state.user_dept = ""
+with col1:
+    st.markdown("### 👤 用户信息登记")
+    st.info("请先填写下方信息，才能进行分析操作。")
 
-user_name = st.sidebar.text_input("您的姓名", value=st.session_state.user_name)
-user_dept = st.sidebar.text_input("所属部门", value=st.session_state.user_dept)
-st.session_state.user_name = user_name
-st.session_state.user_dept = user_dept
+    if 'user_name' not in st.session_state: st.session_state.user_name = ""
+    if 'user_dept' not in st.session_state: st.session_state.user_dept = ""
 
-st.sidebar.markdown("---")
-with st.sidebar.expander("🔐 管理员：查看使用记录"):
-    password_input = st.text_input("请输入管理员密码", type="password")
+    user_name = st.text_input("您的姓名", value=st.session_state.user_name)
+    user_dept = st.text_input("所属部门", value=st.session_state.user_dept)
+    st.session_state.user_name = user_name
+    st.session_state.user_dept = user_dept
+
+with col2:
+    st.markdown("### 🔐 管理员：查看使用记录")
+    password_input = st.text_input("请输入管理员密码", type="password", key="admin_pwd")
     if password_input == ADMIN_PASSWORD:
         if os.path.exists(LOG_FILE):
             try:
@@ -207,6 +211,7 @@ with st.sidebar.expander("🔐 管理员：查看使用记录"):
     elif password_input != "":
         st.error("密码错误")
 
+# 用户信息填写完才能上传文件
 if user_name and user_dept:
     st.caption(f"欢迎，**{user_dept}** 的 **{user_name}**！🚀 已接入 AI 模型: {MODEL_NAME}")
     uploaded_file = st.file_uploader("📂 请上传 Amazon 退款报告 (CSV)", type="csv")
@@ -252,4 +257,4 @@ if user_name and user_dept:
                         mime="text/html"
                     )
 else:
-    st.warning("👈 请先在左侧侧边栏填写【姓名】和【部门】，即可开始使用工具。")
+    st.warning("👈 请先填写【姓名】和【部门】，即可开始使用工具。")
