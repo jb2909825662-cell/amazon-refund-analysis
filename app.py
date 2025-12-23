@@ -256,12 +256,12 @@ else:
             df = None
             try:
                 # 尝试 UTF-8 读取
-                up_file.seek(0) # ⚡️ 关键修复：确保指针在开头
+                up_file.seek(0)
                 df = pd.read_csv(up_file, encoding='utf-8')
             except UnicodeDecodeError:
                 try:
                     # 尝试 GBK 读取
-                    up_file.seek(0) # ⚡️ 关键修复：重置指针，避免 EmptyDataError
+                    up_file.seek(0)
                     df = pd.read_csv(up_file, encoding='gbk')
                 except Exception as e:
                     st.error(f"文件编码识别失败: {e}")
@@ -283,12 +283,24 @@ else:
                         st.write("正在生成多维可视化视图...")
                         status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                     
-                    # 1. 图表
+                    # 1. 图表 (色彩修复版)
                     st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
                     fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h', 
-                                    color='数量', color_continuous_scale='Blues',
+                                    color='数量', 
+                                    # 🔥 修改点：使用 RdYlGn_r (红黄绿反转)，数值大=红，数值小=绿
+                                    color_continuous_scale='RdYlGn_r',
+                                    text='数量', # 显示数值，防止极短的条形看不清
                                     labels={'数量':'出现频次', '原因_display':'退款原因'})
-                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', yaxis={'categoryorder':'total ascending'})
+                    
+                    # 调整布局，确保文字显示
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)', 
+                        paper_bgcolor='rgba(0,0,0,0)', 
+                        yaxis={'categoryorder':'total ascending'}
+                    )
+                    # 优化文字位置，如果条太短，文字会自动变色以适应
+                    fig.update_traces(textposition='auto') 
+                    
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # 2. 生成报告
