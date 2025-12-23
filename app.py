@@ -234,7 +234,7 @@ def generate_echarts_option(df_counts):
                     "position": "insideRight", # 文字在柱子内部右侧
                     "formatter": "{c}",
                     "color": "#ffffff",    # 🔥 强制白色
-                    "fontSize": 20,        # 🔥 强制 20px 大号字体
+                    "fontSize": 18,        # 🔥 强制 20px 大号字体
                     "fontWeight": "bold",  # 🔥 强制加粗
                     "padding": [0, 10, 0, 0] #稍微右边留点空隙
                 }
@@ -464,3 +464,4 @@ else:
 # 底部填充
 st.write("")
 st.write("")
+
