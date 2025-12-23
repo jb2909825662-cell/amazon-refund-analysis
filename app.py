@@ -91,7 +91,7 @@ def log_action(name, dept, action, note=""):
             csv.writer(f).writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, dept, action, note])
     except: pass
 
-# ================== AI 与 数据处理核心逻辑 (已恢复) ==================
+# ================== AI 与 数据处理核心逻辑 ==================
 def translate_reasons_with_llm(unique_reasons):
     client = OpenAI(api_key=SILICONFLOW_API_KEY, base_url=BASE_URL)
     reasons_str = json.dumps(list(unique_reasons))
@@ -141,7 +141,7 @@ def process_data(df):
 
     return r_counts, sku_counts, Counter(keywords).most_common(12), trans_map
 
-# ================== HTML 报告生成器 (已恢复) ==================
+# ================== HTML 报告生成器 ==================
 def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map):
     sorted_reasons = reason_counts.sort_values('数量', ascending=False)
     reason_rows = "".join([f"<tr><td style='text-align:left'>{r['原因_html']}</td><td>{r['数量']}</td><td>{r['占比']}%</td></tr>" for _, r in sorted_reasons.iterrows()])
@@ -253,59 +253,67 @@ else:
         up_file = st.file_uploader("请拖拽或选择 CSV 文件进行智能解析", type="csv")
         
         if up_file:
+            df = None
             try:
-                # 预读数据
+                # 尝试 UTF-8 读取
+                up_file.seek(0) # ⚡️ 关键修复：确保指针在开头
                 df = pd.read_csv(up_file, encoding='utf-8')
-            except:
-                df = pd.read_csv(up_file, encoding='gbk')
+            except UnicodeDecodeError:
+                try:
+                    # 尝试 GBK 读取
+                    up_file.seek(0) # ⚡️ 关键修复：重置指针，避免 EmptyDataError
+                    df = pd.read_csv(up_file, encoding='gbk')
+                except Exception as e:
+                    st.error(f"文件编码识别失败: {e}")
+            except pd.errors.EmptyDataError:
+                st.error("❌ 上传的文件内容为空！")
+            except Exception as e:
+                st.error(f"❌ 文件读取发生未知错误: {e}")
             
-            st.success(f"数据已载入：`{up_file.name}` (共 {len(df)} 条记录)")
-            
-            if st.button("📊 执行深度 AI 分析"):
-                # 使用状态加载器
-                with st.status("正在建立安全加密连接...", expanded=True) as status:
-                    st.write("正在识别数据维度...")
-                    st.write(f"正在调用 {MODEL_NAME} 进行双语翻译建模...")
+            if df is not None:
+                st.success(f"数据已载入：`{up_file.name}` (共 {len(df)} 条记录)")
+                
+                if st.button("📊 执行深度 AI 分析"):
+                    with st.status("正在建立安全加密连接...", expanded=True) as status:
+                        st.write("正在识别数据维度...")
+                        st.write(f"正在调用 {MODEL_NAME} 进行双语翻译建模...")
+                        
+                        r_counts, sku_counts, keywords, trans_map = process_data(df)
+                        
+                        st.write("正在生成多维可视化视图...")
+                        status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                     
-                    # === 核心处理逻辑 ===
-                    r_counts, sku_counts, keywords, trans_map = process_data(df)
+                    # 1. 图表
+                    st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
+                    fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h', 
+                                    color='数量', color_continuous_scale='Blues',
+                                    labels={'数量':'出现频次', '原因_display':'退款原因'})
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', yaxis={'categoryorder':'total ascending'})
+                    st.plotly_chart(fig, use_container_width=True)
                     
-                    st.write("正在生成多维可视化视图...")
-                    status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
-                
-                # === 结果展示区域 ===
-                
-                # 1. 图表
-                st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
-                fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h', 
-                                color='数量', color_continuous_scale='Blues',
-                                labels={'数量':'出现频次', '原因_display':'退款原因'})
-                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # 2. 生成报告
-                html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map)
-                
-                st.divider()
-                
-                # 3. 下载按钮区 (已修复)
-                col_down1, col_down2 = st.columns([2, 1])
-                with col_down1:
-                    st.markdown("##### 📥 报告已就绪")
-                    st.caption("点击右侧按钮下载包含 SKU 详情和评论分析的完整 HTML 报告。")
-                with col_down2:
-                     st.download_button(
-                        label="📥 下载完整 HTML 分析报告",
-                        data=html_report,
-                        file_name="Amazon_Refund_AI_Report.html",
-                        mime="text/html",
-                        type="primary", # 使用重点样式
-                        use_container_width=True
-                    )
+                    # 2. 生成报告
+                    html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map)
+                    
+                    st.divider()
+                    
+                    # 3. 下载按钮区
+                    col_down1, col_down2 = st.columns([2, 1])
+                    with col_down1:
+                        st.markdown("##### 📥 报告已就绪")
+                        st.caption("点击右侧按钮下载包含 SKU 详情和评论分析的完整 HTML 报告。")
+                    with col_down2:
+                         st.download_button(
+                            label="📥 下载完整 HTML 分析报告",
+                            data=html_report,
+                            file_name="Amazon_Refund_AI_Report.html",
+                            mime="text/html",
+                            type="primary",
+                            use_container_width=True
+                        )
 
-                if 'last_f' not in st.session_state or st.session_state.last_f != up_file.name:
-                    log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析任务", up_file.name)
-                    st.session_state.last_f = up_file.name
+                    if 'last_f' not in st.session_state or st.session_state.last_f != up_file.name:
+                        log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析任务", up_file.name)
+                        st.session_state.last_f = up_file.name
         
         st.markdown("</div>", unsafe_allow_html=True)
 
