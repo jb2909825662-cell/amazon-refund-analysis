@@ -314,7 +314,7 @@ else:
                         textangle=0,                # 强制水平显示 (0度)
                         textfont=dict(
                             color='white',          # 强制白色字体
-                            size=14,                # 字号加大
+                            size=20,                # 字号加大
                             weight='bold'           # 加粗，防止背景色干扰
                         ),
                         insidetextanchor='middle'   # 文字居中对齐
@@ -351,3 +351,4 @@ else:
 # 底部填充
 st.write("")
 st.write("")
+
