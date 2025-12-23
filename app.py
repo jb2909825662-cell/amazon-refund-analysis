@@ -141,8 +141,12 @@ def process_data(df):
 
     return r_counts, sku_counts, Counter(keywords).most_common(12), trans_map
 
-# ================== HTML 报告生成器 ==================
-def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map):
+# ================== HTML 报告生成器 (含图表融合) ==================
+def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, fig):
+    # 1. 将 Plotly 图表转换为 HTML div 字符串 (不包含完整的 html 标签，只包含 div)
+    # include_plotlyjs=False 因为我们会手动在 head 里引入 CDN，减小文件体积
+    plot_html = fig.to_html(full_html=False, include_plotlyjs=False)
+
     sorted_reasons = reason_counts.sort_values('数量', ascending=False)
     reason_rows = "".join([f"<tr><td style='text-align:left'>{r['原因_html']}</td><td>{r['数量']}</td><td>{r['占比']}%</td></tr>" for _, r in sorted_reasons.iterrows()])
 
@@ -170,6 +174,7 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map):
     <html>
     <head>
         <meta charset="utf-8">
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background:#f4f7f6; padding:40px; color:#333; }}
             .container {{ max-width:1000px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
@@ -179,15 +184,24 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map):
             th {{ background:#b94136; color:#ffffff; padding:12px; text-align:left; border: none; }}
             td {{ padding:10px 12px; border-bottom:1px solid #eee; vertical-align: middle; }}
             .tag {{ display:inline-block; background:#e8f4f8; color:#2980b9; padding:6px 12px; margin:5px; border-radius:4px; }}
+            .chart-container {{ margin-bottom: 40px; padding: 10px; border: 1px solid #eee; border-radius: 8px; }}
         </style>
     </head>
     <body>
         <div class="container">
             <h1>📊 Amazon 退款分析报告 (AI 智能翻译)</h1>
-            <h2>1. 全局退款原因分布</h2>
+            
+            <h2>1. 可视化分析概览</h2>
+            <div class="chart-container">
+                {plot_html}
+            </div>
+
+            <h2>2. 全局退款原因分布表</h2>
             <table><tr><th style="width:60%">退款原因 (Original / CN)</th><th>频次</th><th>占比</th></tr>{reason_rows}</table>
-            <h2>2. 重点 SKU 详细分析</h2>{sku_tables}
-            <h2>3. 客户评论关键词</h2><div style="line-height:1.6;">{kw_html}</div>
+            
+            <h2>3. 重点 SKU 详细分析</h2>{sku_tables}
+            
+            <h2>4. 客户评论关键词</h2><div style="line-height:1.6;">{kw_html}</div>
         </div>
     </body>
     </html>
@@ -281,49 +295,45 @@ else:
                         st.write("正在生成多维可视化视图...")
                         status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                     
-                    # === 1. 图表 (🔥 终极视觉优化版) ===
+                    # === 1. 图表构建 (包含字体加大) ===
                     st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
                     
-                    # 自定义鲜亮的“红绿灯”渐变色 (Green -> Yellow -> Red)
-                    # 0.0: #2ecc71 (绿)
-                    # 0.5: #f1c40f (黄)
-                    # 1.0: #ff0000 (鲜红 - 满足您的要求)
-                    bright_traffic_scale = [
-                        (0.0, "#2ecc71"), 
-                        (0.5, "#f1c40f"), 
-                        (1.0, "#ff0000")
-                    ]
+                    # 自定义鲜亮的“红绿灯”渐变色
+                    bright_traffic_scale = [(0.0, "#2ecc71"), (0.5, "#f1c40f"), (1.0, "#ff0000")]
                     
                     fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h', 
                                     color='数量', 
-                                    color_continuous_scale=bright_traffic_scale, # 应用自定义色谱
-                                    text='数量', # 显示数值
+                                    color_continuous_scale=bright_traffic_scale,
+                                    text='数量',
                                     labels={'数量':'出现频次', '原因_display':'退款原因'})
                     
-                    # 调整布局与字体
+                    # 🔥【字体加大 1】：调整坐标轴和图例的全局字体
                     fig.update_layout(
                         plot_bgcolor='rgba(0,0,0,0)', 
                         paper_bgcolor='rgba(0,0,0,0)', 
                         yaxis={'categoryorder':'total ascending'},
-                        font=dict(size=14) # 全局字体加大
+                        font=dict(
+                            size=16  # 👈 坐标轴文字加大到 16px
+                        )
                     )
                     
-                    # 🔥 核心修正：白色字体 + 水平显示 + 强制在条形内部
+                    # 🔥【字体加大 2】：调整柱子内部数字的字体
                     fig.update_traces(
-                        textposition='inside',      # 强制数字在条形图内部
-                        textangle=0,                # 强制水平显示 (0度)
+                        textposition='inside',      
+                        textangle=0,                
                         textfont=dict(
-                            color='white',          # 强制白色字体
-                            size=20,                # 字号加大
-                            weight='bold'           # 加粗，防止背景色干扰
+                            color='white',          
+                            size=20,                # 👈 数字加大到 20px
+                            weight='bold'           
                         ),
-                        insidetextanchor='middle'   # 文字居中对齐
+                        insidetextanchor='middle'   
                     )
                     
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # === 2. 生成报告 ===
-                    html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map)
+                    # === 2. 生成报告 (融合图表) ===
+                    # 传入 fig 参数，将图表融合进 HTML
+                    html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map, fig)
                     
                     st.divider()
                     
@@ -331,7 +341,7 @@ else:
                     col_down1, col_down2 = st.columns([2, 1])
                     with col_down1:
                         st.markdown("##### 📥 报告已就绪")
-                        st.caption("点击右侧按钮下载包含 SKU 详情和评论分析的完整 HTML 报告。")
+                        st.caption("点击右侧按钮下载完整 HTML 报告（已融合图表）。")
                     with col_down2:
                          st.download_button(
                             label="📥 下载完整 HTML 分析报告",
@@ -351,4 +361,3 @@ else:
 # 底部填充
 st.write("")
 st.write("")
-
