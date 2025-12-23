@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import json
 from openai import OpenAI
 import os
@@ -8,6 +7,7 @@ import datetime
 import csv
 import re
 from collections import Counter
+import streamlit.components.v1 as components # 用于在 Streamlit 中渲染 ECharts
 
 # ================== 🛠️ 配置区域 ==================
 SILICONFLOW_API_KEY = "sk-wmbipxzixpvwddjoisctfpsdwneznyliwoxgxbbzcdrvaiye" 
@@ -91,6 +91,33 @@ def log_action(name, dept, action, note=""):
             csv.writer(f).writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, dept, action, note])
     except: pass
 
+# ================== 🎨 颜色算法 (红绿灯渐变) ==================
+def get_traffic_color(value, min_val, max_val):
+    """
+    根据数值计算颜色：
+    低值 -> 绿色 (#2ecc71)
+    中值 -> 黄色 (#f1c40f)
+    高值 -> 红色 (#e74c3c)
+    """
+    if max_val == min_val: return "#e74c3c"
+    
+    # 归一化 (0.0 - 1.0)
+    ratio = (value - min_val) / (max_val - min_val)
+    
+    # 简单的插值算法
+    if ratio < 0.5:
+        # Green to Yellow
+        r = int(46 + (241 - 46) * (ratio * 2))
+        g = int(204 + (196 - 204) * (ratio * 2))
+        b = int(113 + (15 - 113) * (ratio * 2))
+    else:
+        # Yellow to Red
+        r = int(241 + (231 - 241) * ((ratio - 0.5) * 2))
+        g = int(196 + (76 - 196) * ((ratio - 0.5) * 2))
+        b = int(15 + (60 - 15) * ((ratio - 0.5) * 2))
+        
+    return f"#{r:02x}{g:02x}{b:02x}"
+
 # ================== AI 与 数据处理核心逻辑 ==================
 def translate_reasons_with_llm(unique_reasons):
     client = OpenAI(api_key=SILICONFLOW_API_KEY, base_url=BASE_URL)
@@ -127,6 +154,9 @@ def process_data(df):
     r_counts['原因_html'] = r_counts['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'html'))
     r_counts['占比'] = (r_counts['数量'] / len(df) * 100).round(2)
     
+    # ECharts 需要数据按升序排列才能在水平柱状图中显示为从上到下的降序
+    r_counts = r_counts.sort_values('数量', ascending=True) 
+    
     # SKU 分析
     sku_counts = df['sku'].value_counts().reset_index().head(10)
     sku_counts.columns = ['SKU', '退款数量']
@@ -141,12 +171,84 @@ def process_data(df):
 
     return r_counts, sku_counts, Counter(keywords).most_common(12), trans_map
 
-# ================== HTML 报告生成器 (含图表融合) ==================
-def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, fig):
-    # 1. 将 Plotly 图表转换为 HTML div 字符串 (不包含完整的 html 标签，只包含 div)
-    # include_plotlyjs=False 因为我们会手动在 head 里引入 CDN，减小文件体积
-    plot_html = fig.to_html(full_html=False, include_plotlyjs=False)
+# ================== 📊 ECharts 图表构建器 (Python -> JS JSON) ==================
+def generate_echarts_option(df_counts):
+    # 准备数据
+    categories = df_counts['原因_display'].tolist()
+    values = df_counts['数量'].tolist()
+    
+    min_v = min(values) if values else 0
+    max_v = max(values) if values else 100
+    
+    # 构建带有单独样式的 data 数组
+    data_with_style = []
+    for v in values:
+        color = get_traffic_color(v, min_v, max_v)
+        data_with_style.append({
+            "value": v,
+            "itemStyle": {
+                "color": color,
+                "borderRadius": [0, 4, 4, 0] # 现代感的圆角
+            }
+        })
 
+    # ECharts 配置项 (JSON 结构)
+    option = {
+        "backgroundColor": "#ffffff",
+        "animationDuration": 1500, # 丝滑入场动画
+        "animationEasing": "cubicOut",
+        "tooltip": {
+            "trigger": "axis",
+            "axisPointer": {"type": "shadow"}
+        },
+        "grid": {
+            "left": "3%",
+            "right": "4%",
+            "bottom": "3%",
+            "containLabel": True
+        },
+        "xAxis": {
+            "type": "value",
+            "boundaryGap": [0, 0.01],
+            "splitLine": {"show": False} # 去掉背景网格线，更干净
+        },
+        "yAxis": {
+            "type": "category",
+            "data": categories,
+            "axisLabel": {
+                "fontSize": 14,
+                "fontWeight": "bold",
+                "color": "#333"
+            },
+            "axisTick": {"show": False},
+            "axisLine": {"show": False}
+        },
+        "series": [
+            {
+                "name": "退款数量",
+                "type": "bar",
+                "data": data_with_style,
+                "barWidth": "60%",
+                "label": {
+                    "show": True,
+                    "position": "insideRight", # 文字在柱子内部右侧
+                    "formatter": "{c}",
+                    "color": "#ffffff",    # 🔥 强制白色
+                    "fontSize": 20,        # 🔥 强制 20px 大号字体
+                    "fontWeight": "bold",  # 🔥 强制加粗
+                    "padding": [0, 10, 0, 0] #稍微右边留点空隙
+                }
+            }
+        ]
+    }
+    return option
+
+# ================== HTML 报告生成器 (含 ECharts) ==================
+def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, echarts_option):
+    # 将 Python 字典转为 JSON 字符串，供 HTML 中的 JS 使用
+    echarts_json = json.dumps(echarts_option)
+
+    # 需要倒序用于表格显示 (大数在前)
     sorted_reasons = reason_counts.sort_values('数量', ascending=False)
     reason_rows = "".join([f"<tr><td style='text-align:left'>{r['原因_html']}</td><td>{r['数量']}</td><td>{r['占比']}%</td></tr>" for _, r in sorted_reasons.iterrows()])
 
@@ -171,10 +273,12 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, fig
     kw_html = "".join([f"<span class='tag'>{k} <small>({v})</small></span>" for k, v in keywords])
 
     return f"""
+    <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <title>Amazon Refund Analysis Report</title>
+        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background:#f4f7f6; padding:40px; color:#333; }}
             .container {{ max-width:1000px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
@@ -184,7 +288,16 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, fig
             th {{ background:#b94136; color:#ffffff; padding:12px; text-align:left; border: none; }}
             td {{ padding:10px 12px; border-bottom:1px solid #eee; vertical-align: middle; }}
             .tag {{ display:inline-block; background:#e8f4f8; color:#2980b9; padding:6px 12px; margin:5px; border-radius:4px; }}
-            .chart-container {{ margin-bottom: 40px; padding: 10px; border: 1px solid #eee; border-radius: 8px; }}
+            
+            /* 图表容器 */
+            #main-chart {{
+                width: 100%;
+                height: 650px; /* 增加高度以适应大字体 */
+                margin-bottom: 40px;
+                border: 1px solid #f0f0f0;
+                border-radius: 8px;
+                padding: 10px;
+            }}
         </style>
     </head>
     <body>
@@ -192,9 +305,17 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, fig
             <h1>📊 Amazon 退款分析报告 (AI 智能翻译)</h1>
             
             <h2>1. 可视化分析概览</h2>
-            <div class="chart-container">
-                {plot_html}
-            </div>
+            <div id="main-chart"></div>
+            <script type="text/javascript">
+                // 初始化图表
+                var myChart = echarts.init(document.getElementById('main-chart'));
+                var option = {echarts_json}; // 注入 Python 生成的 JSON
+                myChart.setOption(option);
+                // 响应式调整
+                window.addEventListener('resize', function() {{
+                    myChart.resize();
+                }});
+            </script>
 
             <h2>2. 全局退款原因分布表</h2>
             <table><tr><th style="width:60%">退款原因 (Original / CN)</th><th>频次</th><th>占比</th></tr>{reason_rows}</table>
@@ -292,48 +413,30 @@ else:
                         
                         r_counts, sku_counts, keywords, trans_map = process_data(df)
                         
-                        st.write("正在生成多维可视化视图...")
+                        st.write("正在构建 ECharts 动态可视化...")
+                        # 生成 ECharts 配置
+                        echarts_option = generate_echarts_option(r_counts)
+                        
                         status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                     
-                    # === 1. 图表构建 (包含字体加大) ===
-                    st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
+                    # === 1. ECharts 动态展示 ===
+                    st.markdown("### 📈 退款原因动态分布 (ECharts)")
                     
-                    # 自定义鲜亮的“红绿灯”渐变色
-                    bright_traffic_scale = [(0.0, "#2ecc71"), (0.5, "#f1c40f"), (1.0, "#ff0000")]
+                    # 在 Streamlit 中渲染 ECharts (HTML iframe 方式)
+                    # 这样做的好处是保证了预览效果和下载报告的一致性
+                    echarts_html_snippet = f"""
+                    <div id="chart-container" style="width:100%; height:600px;"></div>
+                    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+                    <script>
+                        var chart = echarts.init(document.getElementById('chart-container'));
+                        var option = {json.dumps(echarts_option)};
+                        chart.setOption(option);
+                    </script>
+                    """
+                    components.html(echarts_html_snippet, height=620)
                     
-                    fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h', 
-                                    color='数量', 
-                                    color_continuous_scale=bright_traffic_scale,
-                                    text='数量',
-                                    labels={'数量':'出现频次', '原因_display':'退款原因'})
-                    
-                    # 🔥【字体加大 1】：调整坐标轴和图例的全局字体
-                    fig.update_layout(
-                        plot_bgcolor='rgba(0,0,0,0)', 
-                        paper_bgcolor='rgba(0,0,0,0)', 
-                        yaxis={'categoryorder':'total ascending'},
-                        font=dict(
-                            size=16  # 👈 坐标轴文字加大到 16px
-                        )
-                    )
-                    
-                    # 🔥【字体加大 2】：调整柱子内部数字的字体
-                    fig.update_traces(
-                        textposition='inside',      
-                        textangle=0,                
-                        textfont=dict(
-                            color='white',          
-                            size=20,                # 👈 数字加大到 20px
-                            weight='bold'           
-                        ),
-                        insidetextanchor='middle'   
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # === 2. 生成报告 (融合图表) ===
-                    # 传入 fig 参数，将图表融合进 HTML
-                    html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map, fig)
+                    # === 2. 生成报告 (融合 ECharts) ===
+                    html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map, echarts_option)
                     
                     st.divider()
                     
@@ -341,7 +444,7 @@ else:
                     col_down1, col_down2 = st.columns([2, 1])
                     with col_down1:
                         st.markdown("##### 📥 报告已就绪")
-                        st.caption("点击右侧按钮下载完整 HTML 报告（已融合图表）。")
+                        st.caption("点击右侧按钮下载包含 ECharts 动态图表的完整 HTML 报告。")
                     with col_down2:
                          st.download_button(
                             label="📥 下载完整 HTML 分析报告",
