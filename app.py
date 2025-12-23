@@ -255,12 +255,10 @@ else:
         if up_file:
             df = None
             try:
-                # 尝试 UTF-8 读取
                 up_file.seek(0)
                 df = pd.read_csv(up_file, encoding='utf-8')
             except UnicodeDecodeError:
                 try:
-                    # 尝试 GBK 读取
                     up_file.seek(0)
                     df = pd.read_csv(up_file, encoding='gbk')
                 except Exception as e:
@@ -283,32 +281,53 @@ else:
                         st.write("正在生成多维可视化视图...")
                         status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                     
-                    # 1. 图表 (色彩修复版)
+                    # === 1. 图表 (🔥 终极视觉优化版) ===
                     st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
+                    
+                    # 自定义鲜亮的“红绿灯”渐变色 (Green -> Yellow -> Red)
+                    # 0.0: #2ecc71 (绿)
+                    # 0.5: #f1c40f (黄)
+                    # 1.0: #ff0000 (鲜红 - 满足您的要求)
+                    bright_traffic_scale = [
+                        (0.0, "#2ecc71"), 
+                        (0.5, "#f1c40f"), 
+                        (1.0, "#ff0000")
+                    ]
+                    
                     fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h', 
                                     color='数量', 
-                                    # 🔥 修改点：使用 RdYlGn_r (红黄绿反转)，数值大=红，数值小=绿
-                                    color_continuous_scale='RdYlGn_r',
-                                    text='数量', # 显示数值，防止极短的条形看不清
+                                    color_continuous_scale=bright_traffic_scale, # 应用自定义色谱
+                                    text='数量', # 显示数值
                                     labels={'数量':'出现频次', '原因_display':'退款原因'})
                     
-                    # 调整布局，确保文字显示
+                    # 调整布局与字体
                     fig.update_layout(
                         plot_bgcolor='rgba(0,0,0,0)', 
                         paper_bgcolor='rgba(0,0,0,0)', 
-                        yaxis={'categoryorder':'total ascending'}
+                        yaxis={'categoryorder':'total ascending'},
+                        font=dict(size=14) # 全局字体加大
                     )
-                    # 优化文字位置，如果条太短，文字会自动变色以适应
-                    fig.update_traces(textposition='auto') 
+                    
+                    # 🔥 核心修正：白色字体 + 水平显示 + 强制在条形内部
+                    fig.update_traces(
+                        textposition='inside',      # 强制数字在条形图内部
+                        textangle=0,                # 强制水平显示 (0度)
+                        textfont=dict(
+                            color='white',          # 强制白色字体
+                            size=14,                # 字号加大
+                            weight='bold'           # 加粗，防止背景色干扰
+                        ),
+                        insidetextanchor='middle'   # 文字居中对齐
+                    )
                     
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # 2. 生成报告
+                    # === 2. 生成报告 ===
                     html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map)
                     
                     st.divider()
                     
-                    # 3. 下载按钮区
+                    # === 3. 下载按钮区 ===
                     col_down1, col_down2 = st.columns([2, 1])
                     with col_down1:
                         st.markdown("##### 📥 报告已就绪")
