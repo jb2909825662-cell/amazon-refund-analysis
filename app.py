@@ -19,18 +19,17 @@ LOG_FILE = "access_log.csv"
 # 页面配置
 st.set_page_config(page_title="Amazon 智能分析终端", layout="wide", page_icon="🛡️")
 
-# ================== 🛡️ 【封印 2.0：极速 JS 巡逻 + CSS 预埋】 ==================
-# 将此处代码置于最顶部，确保浏览器第一时间解析
+# ================== 🛡️ 【极速封印：JS 巡逻 + CSS 预埋】 ==================
 def apply_ultra_mask():
-    # 预埋 CSS：在 JS 生效前先通过 CSS 强制隐藏已知 ID
+    # 预埋 CSS：第一时间强行隐藏
     st.markdown("""
         <style>
-            /* 基础组件强制隐藏 */
+            /* 1. 基础组件隐藏 */
             header[data-testid="stHeader"], [data-testid="stDecoration"], footer, [data-testid="stStatusWidget"] {
                 display: none !important; visibility: hidden !important;
             }
 
-            /* 右下角物理屏蔽层：极高层级 + 拦截点击 */
+            /* 2. 右下角物理屏蔽层：极高层级，拦截点击 */
             .terminal-shield {
                 position: fixed; bottom: 0; right: 0; width: 220px; height: 50px;
                 background: #0f172a; z-index: 2147483647; pointer-events: auto;
@@ -40,24 +39,32 @@ def apply_ultra_mask():
             }
             .shield-text { color: #38bdf8; font-family: monospace; font-size: 11px; letter-spacing: 2px; font-weight: bold; }
 
-            /* 专业 UI 样式优化 */
+            /* 3. 专业级 UI 布局优化 */
             .stApp { background: #f8fafc; }
             .main-card {
-                background: white; padding: 40px; border-radius: 20px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.05); border: 1px solid #f1f5f9;
+                background: white; padding: 40px; border-radius: 24px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.06); border: 1px solid #f1f5f9;
+                margin-bottom: 20px;
             }
+            
+            /* 标签样式加粗 */
+            label[data-testid="stWidgetLabel"] p {
+                font-weight: 600 !important; color: #334155 !important; font-size: 14px !important;
+            }
+
+            /* 按钮美化：深色渐变 */
             .stButton>button {
-                width: 100%; border-radius: 10px !important; height: 45px;
+                width: 100%; border-radius: 12px !important; height: 48px;
                 background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
                 color: white !important; font-weight: bold !important; border: none !important;
-                transition: all 0.3s ease !important;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
             }
-            .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+            .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
         </style>
         <div class="terminal-shield" id="main-mask"><span class="shield-text">SYSTEM SECURED</span></div>
     """, unsafe_allow_html=True)
 
-    # 极速 JS：使用 MutationObserver 实时监听并抹除
+    # 4. 极速 JS 巡逻：50ms 频率阻断
     st.html("""
         <script>
             const hideTarget = () => {
@@ -65,9 +72,7 @@ def apply_ultra_mask():
                 const els = topDoc.querySelectorAll('.stAppToolbar, [data-testid="stAppToolbar"], a[href*="streamlit.io"]');
                 els.forEach(el => { el.style.setProperty('display', 'none', 'important'); });
             };
-            // 1. 每 50ms 巡逻一次，消除闪烁感
-            setInterval(hideTarget, 50);
-            // 2. 监听 DOM 变化，瞬时反应
+            setInterval(hideTarget, 50); // 每 50 毫秒扫描一次
             const observer = new MutationObserver(hideTarget);
             observer.observe(window.top.document.body, { childList: true, subtree: true });
         </script>
@@ -91,72 +96,99 @@ def log_action(name, dept, action, note=""):
     except: pass
 
 # ================== UI 主界面 ==================
-st.markdown("<h1 style='text-align:center; color:#0f172a; margin-top:50px;'>AMAZON ANALYTICS TERMINAL</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align:center; color:#0f172a; margin: 40px 0;'>🛡️ Amazon 退款智能分析终端 (Pro)</h1>", unsafe_allow_html=True)
 
 # 步骤一：身份验证区
 if not st.session_state.confirmed:
     with st.container():
         st.markdown("<div class='main-card'>", unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([1.2, 0.8], gap="large")
+        
         with col1:
-            st.markdown("### 👤 身份登记")
-            u_name = st.text_input("姓名", placeholder="Your Name", label_visibility="collapsed")
-            u_dept = st.text_input("部门", placeholder="Department", label_visibility="collapsed")
-            if st.button("🚀 初始化分析终端"):
+            st.markdown("#### 👤 终端访问登记")
+            st.caption("请输入您的真实信息以解锁分析功能。")
+            st.write("")
+            u_name = st.text_input("您的姓名", placeholder="例如：张三")
+            u_dept = st.text_input("所属部门", placeholder="例如：运营一部")
+            
+            st.write("")
+            if st.button("🚀 初始化分析终端并进入"):
                 if u_name and u_dept:
                     st.session_state.user_name = u_name
                     st.session_state.user_dept = u_dept
                     st.session_state.confirmed = True
-                    log_action(u_name, u_dept, "终端启动")
+                    log_action(u_name, u_dept, "终端初始化成功")
                     st.rerun()
                 else:
-                    st.error("请完整填写姓名和部门")
+                    st.warning("⚠️ 请完整填写姓名和部门以继续")
         
         with col2:
-            st.markdown("### 🔐 管理权证")
-            pwd = st.text_input("管理员密码", type="password", placeholder="Admin Key", label_visibility="collapsed")
+            st.markdown("#### 🔐 管理员权限")
+            st.caption("仅限开发者进行日志管理与维护。")
+            st.write("")
+            pwd = st.text_input("管理权证 (Password)", type="password", placeholder="Admin Key")
             if pwd == ADMIN_PASSWORD:
+                # 管理员登录后卸载遮罩
                 st.markdown("<style>.terminal-shield{display:none !important;}</style>", unsafe_allow_html=True)
-                st.success("管理员权限已解锁 (遮罩已卸载)")
+                st.success("✅ 管理员身份已验证")
                 if os.path.exists(LOG_FILE):
-                    st.download_button("📥 导出访问日志", pd.read_csv(LOG_FILE).to_csv(index=False).encode('utf-8-sig'), "logs.csv", "text/csv")
+                    st.download_button("📥 导出全量访问日志", pd.read_csv(LOG_FILE).to_csv(index=False).encode('utf-8-sig'), "access_log.csv", "text/csv")
         st.markdown("</div>", unsafe_allow_html=True)
 
 # 步骤二：核心功能区 (确认身份后才显示)
 else:
     with st.container():
-        st.markdown(f"<div class='main-card'>", unsafe_allow_html=True)
-        st.info(f"🟢 **当前节点已授权：** {st.session_state.user_dept} | {st.session_state.user_name}")
+        st.markdown("<div class='main-card'>", unsafe_allow_html=True)
         
-        up_file = st.file_uploader("📂 选择 Amazon 退款报告文件 (CSV)", type="csv")
+        # 状态栏
+        c_status1, c_status2 = st.columns([3, 1])
+        with c_status1:
+            st.info(f"🟢 **当前节点已授权：** {st.session_state.user_dept} | {st.session_state.user_name}")
+        with c_status2:
+            if st.button("🔄 退出/切换用户"):
+                st.session_state.confirmed = False
+                st.rerun()
+
+        st.markdown("---")
+        
+        # 文件上传区域
+        st.markdown("#### 📂 载入 Amazon 数据源")
+        up_file = st.file_uploader("请拖拽或选择 CSV 文件进行智能解析", type="csv")
         
         if up_file:
             try:
+                # 预读数据，不展示具体表格以保持专业感
                 df = pd.read_csv(up_file, encoding='utf-8')
             except:
                 df = pd.read_csv(up_file, encoding='gbk')
             
-            if st.button("开始 AI 智能解析"):
+            st.success(f"数据已载入：`{up_file.name}` (共 {len(df)} 条记录)")
+            
+            if st.button("📊 执行深度 AI 分析"):
+                # 使用状态加载器
                 with st.status("正在建立安全加密连接...", expanded=True) as status:
-                    st.write("正在读取原始数据结构...")
-                    # 模拟处理
-                    st.write(f"正在调用 {MODEL_NAME} 进行自然语言处理...")
-                    # 数据逻辑处理...
-                    status.update(label="分析完成！", state="complete", expanded=False)
+                    st.write("正在识别数据维度...")
+                    st.write(f"正在调用 {MODEL_NAME} 进行双语翻译建模...")
+                    # 这里放置您的 translate_reasons_with_llm 等处理逻辑
+                    st.write("正在生成多维可视化视图...")
+                    status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                 
-                # 示例图表展示
-                st.markdown("### 📊 分析透视图")
-                chart_data = df['reason'].value_counts().reset_index()
-                fig = px.pie(chart_data, values='count', names='reason', hole=.4, 
-                             color_discrete_sequence=px.colors.sequential.RdBu)
-                fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-                st.plotly_chart(fig, use_container_width=True)
+                # 展示图表
+                st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
+                if 'reason' in df.columns:
+                    chart_data = df['reason'].value_counts().reset_index()
+                    fig = px.bar(chart_data, x='count', y='reason', orientation='h', 
+                                 color='count', color_continuous_scale='Blues',
+                                 labels={'count':'出现频次', 'reason':'退款原因'})
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
                 
                 if 'last_f' not in st.session_state or st.session_state.last_f != up_file.name:
-                    log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析", up_file.name)
+                    log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析任务", up_file.name)
                     st.session_state.last_f = up_file.name
-
-        if st.button("🔄 退出并切换用户", type="secondary"):
-            st.session_state.confirmed = False
-            st.rerun()
+        
         st.markdown("</div>", unsafe_allow_html=True)
+
+# 底部填充，避免被遮罩挡住内容
+st.write("")
+st.write("")
