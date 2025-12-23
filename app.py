@@ -21,7 +21,6 @@ st.set_page_config(page_title="Amazon 智能分析终端", layout="wide", page_i
 
 # ================== 🛡️ 【极速封印：JS 巡逻 + CSS 预埋】 ==================
 def apply_ultra_mask():
-    # 预埋 CSS：第一时间强行隐藏
     st.markdown("""
         <style>
             /* 1. 基础组件隐藏 */
@@ -29,7 +28,7 @@ def apply_ultra_mask():
                 display: none !important; visibility: hidden !important;
             }
 
-            /* 2. 右下角物理屏蔽层：极高层级，拦截点击 */
+            /* 2. 右下角物理屏蔽层 */
             .terminal-shield {
                 position: fixed; bottom: 0; right: 0; width: 220px; height: 50px;
                 background: #0f172a; z-index: 2147483647; pointer-events: auto;
@@ -47,12 +46,10 @@ def apply_ultra_mask():
                 margin-bottom: 20px;
             }
             
-            /* 标签样式加粗 */
             label[data-testid="stWidgetLabel"] p {
                 font-weight: 600 !important; color: #334155 !important; font-size: 14px !important;
             }
 
-            /* 按钮美化：深色渐变 */
             .stButton>button {
                 width: 100%; border-radius: 12px !important; height: 48px;
                 background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
@@ -64,7 +61,6 @@ def apply_ultra_mask():
         <div class="terminal-shield" id="main-mask"><span class="shield-text">SYSTEM SECURED</span></div>
     """, unsafe_allow_html=True)
 
-    # 4. 极速 JS 巡逻：50ms 频率阻断
     st.html("""
         <script>
             const hideTarget = () => {
@@ -72,7 +68,7 @@ def apply_ultra_mask():
                 const els = topDoc.querySelectorAll('.stAppToolbar, [data-testid="stAppToolbar"], a[href*="streamlit.io"]');
                 els.forEach(el => { el.style.setProperty('display', 'none', 'important'); });
             };
-            setInterval(hideTarget, 50); // 每 50 毫秒扫描一次
+            setInterval(hideTarget, 50);
             const observer = new MutationObserver(hideTarget);
             observer.observe(window.top.document.body, { childList: true, subtree: true });
         </script>
@@ -94,6 +90,108 @@ def log_action(name, dept, action, note=""):
         with open(LOG_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
             csv.writer(f).writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, dept, action, note])
     except: pass
+
+# ================== AI 与 数据处理核心逻辑 (已恢复) ==================
+def translate_reasons_with_llm(unique_reasons):
+    client = OpenAI(api_key=SILICONFLOW_API_KEY, base_url=BASE_URL)
+    reasons_str = json.dumps(list(unique_reasons))
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "system", "content": "你是一个专业的亚马逊翻译助手。"}, 
+                      {"role": "user", "content": f"将以下列表翻译成中文JSON: {reasons_str}"}],
+            temperature=0.1, response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content.strip())
+    except: return {}
+
+def format_bilingual(text, trans_map, mode='text'):
+    text = str(text)
+    cn = trans_map.get(text)
+    if cn: return f"{text}<br>({cn})" if mode == 'html' else f"{text} ({cn})"
+    return text
+
+@st.cache_data(show_spinner=False)
+def process_data(df):
+    df.columns = [c.strip() for c in df.columns]
+    unique_reasons = [str(r) for r in df['reason'].dropna().unique()]
+    
+    # AI 翻译
+    with st.spinner("AI 正在执行语言解析..."):
+        trans_map = translate_reasons_with_llm(unique_reasons)
+    
+    # 原因分析
+    r_counts = df['reason'].value_counts().reset_index()
+    r_counts.columns = ['原因_en', '数量']
+    r_counts['原因_display'] = r_counts['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'text'))
+    r_counts['原因_html'] = r_counts['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'html'))
+    r_counts['占比'] = (r_counts['数量'] / len(df) * 100).round(2)
+    
+    # SKU 分析
+    sku_counts = df['sku'].value_counts().reset_index().head(10)
+    sku_counts.columns = ['SKU', '退款数量']
+    
+    # 关键词分析
+    keywords = []
+    if 'customer-comments' in df.columns:
+        stop_words = {'the','to','and','a','of','in','is','it','was','for','on','my','i','with','not','returned','item','amazon','unit','nan','this','that','but','have'}
+        text = " ".join(df['customer-comments'].dropna().astype(str)).lower()
+        words = re.findall(r'\w+', text)
+        keywords = [w for w in words if w not in stop_words and len(w) > 2]
+
+    return r_counts, sku_counts, Counter(keywords).most_common(12), trans_map
+
+# ================== HTML 报告生成器 (已恢复) ==================
+def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map):
+    sorted_reasons = reason_counts.sort_values('数量', ascending=False)
+    reason_rows = "".join([f"<tr><td style='text-align:left'>{r['原因_html']}</td><td>{r['数量']}</td><td>{r['占比']}%</td></tr>" for _, r in sorted_reasons.iterrows()])
+
+    sku_tables = ""
+    if not sku_counts.empty:
+        top_skus = sku_counts.sort_values('退款数量', ascending=False).head(5)['SKU'].tolist()
+        for sku in top_skus:
+            sku_df = df[df['sku'] == sku]
+            total = len(sku_df)
+            sku_reason = sku_df['reason'].value_counts().reset_index()
+            sku_reason.columns = ['原因_en', '频次']
+            sku_reason['原因_html'] = sku_reason['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'html'))
+            sku_reason['占比'] = (sku_reason['频次'] / total * 100).round(2)
+            rows = "".join([f"<tr><td style='text-align:left'>{row['原因_html']}</td><td>{row['频次']}</td><td>{row['占比']}%</td></tr>" for _, row in sku_reason.iterrows()])
+            sku_tables += f"""
+            <div style="background:white; padding:15px; border-radius:8px; margin-bottom:20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <h3 style="margin-top:0;">SKU：{sku} <span style="font-weight:normal; font-size:0.8em; color:#666">（共 {total} 次退款）</span></h3>
+                <table><tr><th style="width:60%">退款原因</th><th>频次</th><th>占比</th></tr>{rows}</table>
+            </div>
+            """
+
+    kw_html = "".join([f"<span class='tag'>{k} <small>({v})</small></span>" for k, v in keywords])
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background:#f4f7f6; padding:40px; color:#333; }}
+            .container {{ max-width:1000px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
+            h1 {{ text-align:center; border-bottom: 2px solid #eee; padding-bottom: 20px; color:#2c3e50; }}
+            h2 {{ margin-top:40px; color:#6c5ce7; border-left:5px solid #6c5ce7; padding-left:12px; }}
+            table {{ width:100%; border-collapse:collapse; margin-top:10px; font-size: 14px; }}
+            th {{ background:#b94136; color:#ffffff; padding:12px; text-align:left; border: none; }}
+            td {{ padding:10px 12px; border-bottom:1px solid #eee; vertical-align: middle; }}
+            .tag {{ display:inline-block; background:#e8f4f8; color:#2980b9; padding:6px 12px; margin:5px; border-radius:4px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📊 Amazon 退款分析报告 (AI 智能翻译)</h1>
+            <h2>1. 全局退款原因分布</h2>
+            <table><tr><th style="width:60%">退款原因 (Original / CN)</th><th>频次</th><th>占比</th></tr>{reason_rows}</table>
+            <h2>2. 重点 SKU 详细分析</h2>{sku_tables}
+            <h2>3. 客户评论关键词</h2><div style="line-height:1.6;">{kw_html}</div>
+        </div>
+    </body>
+    </html>
+    """
 
 # ================== UI 主界面 ==================
 st.markdown("<h1 style='text-align:center; color:#0f172a; margin: 40px 0;'>🛡️ Amazon 退款智能分析终端 (Pro)</h1>", unsafe_allow_html=True)
@@ -128,7 +226,6 @@ if not st.session_state.confirmed:
             st.write("")
             pwd = st.text_input("管理权证 (Password)", type="password", placeholder="Admin Key")
             if pwd == ADMIN_PASSWORD:
-                # 管理员登录后卸载遮罩
                 st.markdown("<style>.terminal-shield{display:none !important;}</style>", unsafe_allow_html=True)
                 st.success("✅ 管理员身份已验证")
                 if os.path.exists(LOG_FILE):
@@ -157,7 +254,7 @@ else:
         
         if up_file:
             try:
-                # 预读数据，不展示具体表格以保持专业感
+                # 预读数据
                 df = pd.read_csv(up_file, encoding='utf-8')
             except:
                 df = pd.read_csv(up_file, encoding='gbk')
@@ -169,26 +266,49 @@ else:
                 with st.status("正在建立安全加密连接...", expanded=True) as status:
                     st.write("正在识别数据维度...")
                     st.write(f"正在调用 {MODEL_NAME} 进行双语翻译建模...")
-                    # 这里放置您的 translate_reasons_with_llm 等处理逻辑
+                    
+                    # === 核心处理逻辑 ===
+                    r_counts, sku_counts, keywords, trans_map = process_data(df)
+                    
                     st.write("正在生成多维可视化视图...")
                     status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                 
-                # 展示图表
-                st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
-                if 'reason' in df.columns:
-                    chart_data = df['reason'].value_counts().reset_index()
-                    fig = px.bar(chart_data, x='count', y='reason', orientation='h', 
-                                 color='count', color_continuous_scale='Blues',
-                                 labels={'count':'出现频次', 'reason':'退款原因'})
-                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig, use_container_width=True)
+                # === 结果展示区域 ===
                 
+                # 1. 图表
+                st.markdown("### 📈 退款原因分布图 (AI 翻译版)")
+                fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h', 
+                                color='数量', color_continuous_scale='Blues',
+                                labels={'数量':'出现频次', '原因_display':'退款原因'})
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # 2. 生成报告
+                html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map)
+                
+                st.divider()
+                
+                # 3. 下载按钮区 (已修复)
+                col_down1, col_down2 = st.columns([2, 1])
+                with col_down1:
+                    st.markdown("##### 📥 报告已就绪")
+                    st.caption("点击右侧按钮下载包含 SKU 详情和评论分析的完整 HTML 报告。")
+                with col_down2:
+                     st.download_button(
+                        label="📥 下载完整 HTML 分析报告",
+                        data=html_report,
+                        file_name="Amazon_Refund_AI_Report.html",
+                        mime="text/html",
+                        type="primary", # 使用重点样式
+                        use_container_width=True
+                    )
+
                 if 'last_f' not in st.session_state or st.session_state.last_f != up_file.name:
                     log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析任务", up_file.name)
                     st.session_state.last_f = up_file.name
         
         st.markdown("</div>", unsafe_allow_html=True)
 
-# 底部填充，避免被遮罩挡住内容
+# 底部填充
 st.write("")
 st.write("")
