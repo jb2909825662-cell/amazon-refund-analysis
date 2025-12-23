@@ -7,7 +7,7 @@ import datetime
 import csv
 import re
 from collections import Counter
-import streamlit.components.v1 as components # 用于在 Streamlit 中渲染 ECharts
+import streamlit.components.v1 as components
 
 # ================== 🛠️ 配置区域 ==================
 SILICONFLOW_API_KEY = "sk-wmbipxzixpvwddjoisctfpsdwneznyliwoxgxbbzcdrvaiye" 
@@ -23,12 +23,12 @@ st.set_page_config(page_title="Amazon 智能分析终端", layout="wide", page_i
 def apply_ultra_mask():
     st.markdown("""
         <style>
-            /* 1. 基础组件隐藏 */
+            /* 基础组件隐藏 */
             header[data-testid="stHeader"], [data-testid="stDecoration"], footer, [data-testid="stStatusWidget"] {
                 display: none !important; visibility: hidden !important;
             }
 
-            /* 2. 右下角物理屏蔽层 */
+            /* 右下角物理屏蔽层 */
             .terminal-shield {
                 position: fixed; bottom: 0; right: 0; width: 220px; height: 50px;
                 background: #0f172a; z-index: 2147483647; pointer-events: auto;
@@ -38,7 +38,7 @@ def apply_ultra_mask():
             }
             .shield-text { color: #38bdf8; font-family: monospace; font-size: 11px; letter-spacing: 2px; font-weight: bold; }
 
-            /* 3. 专业级 UI 布局优化 */
+            /* 专业级 UI 布局优化 */
             .stApp { background: #f8fafc; }
             .main-card {
                 background: white; padding: 40px; border-radius: 24px;
@@ -78,7 +78,9 @@ apply_ultra_mask()
 
 # ================== 初始化状态管理 ==================
 if 'confirmed' not in st.session_state: st.session_state.confirmed = False
+if 'analyzed_history' not in st.session_state: st.session_state.analyzed_history = set()
 
+# ================== 📝 日志系统 (已修正为中国时间) ==================
 def init_log_file():
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, mode='w', newline='', encoding='utf-8-sig') as f:
@@ -87,9 +89,14 @@ def init_log_file():
 def log_action(name, dept, action, note=""):
     try:
         init_log_file()
+        # 🔥 修正点：强制使用 UTC+8 (中国标准时间)
+        cst_timezone = datetime.timezone(datetime.timedelta(hours=8))
+        current_time = datetime.datetime.now(cst_timezone).strftime("%Y-%m-%d %H:%M:%S")
+        
         with open(LOG_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-            csv.writer(f).writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, dept, action, note])
-    except: pass
+            csv.writer(f).writerow([current_time, name, dept, action, note])
+    except Exception as e:
+        print(f"日志记录失败: {e}")
 
 # ================== 🎨 颜色算法 (红绿灯渐变) ==================
 def get_traffic_color(value, min_val, max_val):
@@ -130,11 +137,9 @@ def process_data(df):
     df.columns = [c.strip() for c in df.columns]
     unique_reasons = [str(r) for r in df['reason'].dropna().unique()]
     
-    # AI 翻译
     with st.spinner("AI 正在执行语言解析..."):
         trans_map = translate_reasons_with_llm(unique_reasons)
     
-    # 原因分析
     r_counts = df['reason'].value_counts().reset_index()
     r_counts.columns = ['原因_en', '数量']
     r_counts['原因_display'] = r_counts['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'text'))
@@ -142,11 +147,9 @@ def process_data(df):
     r_counts['占比'] = (r_counts['数量'] / len(df) * 100).round(2)
     r_counts = r_counts.sort_values('数量', ascending=True) 
     
-    # SKU 分析 (这里取前 12 个，确保给报告生成时有足够数据)
     sku_counts = df['sku'].value_counts().reset_index().head(12)
     sku_counts.columns = ['SKU', '退款数量']
     
-    # 关键词分析
     keywords = []
     if 'customer-comments' in df.columns:
         stop_words = {'the','to','and','a','of','in','is','it','was','for','on','my','i','with','not','returned','item','amazon','unit','nan','this','that','but','have'}
@@ -204,7 +207,7 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
 
     sku_tables = ""
     if not sku_counts.empty:
-        # 🔥 修改点：这里将 .head(5) 改为 .head(10)，展示前 10 个重点 SKU
+        # TOP 10 SKU
         top_skus = sku_counts.sort_values('退款数量', ascending=False).head(10)['SKU'].tolist()
         
         for sku in top_skus:
@@ -325,6 +328,8 @@ else:
             
             if df is not None:
                 st.success(f"数据已载入：`{up_file.name}` (共 {len(df)} 条记录)")
+                
+                # 🔥 移动日志逻辑：确保只有点击分析后才记录，且不重复
                 if st.button("📊 执行深度 AI 分析"):
                     with st.status("正在建立安全加密连接...", expanded=True) as status:
                         st.write("正在识别数据维度...")
@@ -332,6 +337,14 @@ else:
                         r_counts, sku_counts, keywords, trans_map = process_data(df)
                         st.write("正在构建 ECharts 动态可视化...")
                         echarts_option = generate_echarts_option(r_counts)
+                        
+                        # === 日志记录点 (只记录一次) ===
+                        # 使用 文件名+文件大小 作为唯一标识
+                        file_signature = f"{up_file.name}_{up_file.size}"
+                        if file_signature not in st.session_state.analyzed_history:
+                            log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析任务", up_file.name)
+                            st.session_state.analyzed_history.add(file_signature)
+                        
                         status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                     
                     st.markdown("### 📈 退款原因动态分布 (ECharts)")
@@ -361,10 +374,6 @@ else:
                             type="primary",
                             use_container_width=True
                         )
-
-                    if 'last_f' not in st.session_state or st.session_state.last_f != up_file.name:
-                        log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析任务", up_file.name)
-                        st.session_state.last_f = up_file.name
         
         st.markdown("</div>", unsafe_allow_html=True)
 st.write(""); st.write("")
