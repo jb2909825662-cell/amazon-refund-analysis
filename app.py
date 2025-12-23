@@ -10,27 +10,63 @@ import datetime
 import csv
 
 # ================== 🛠️ 配置区域 ==================
-SILICONFLOW_API_KEY = "sk-wmbipxzixpvwddjoisctfpsdwneznyliwoxgxbbzcdrvaiye" 
+SILICONFLOW_API_KEY = "sk-wmbipxzixpvwddjoisctfpsdwneznyliwoxgxbbzcdrvaiye"
 MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
-ADMIN_PASSWORD = "dhzjb" 
+ADMIN_PASSWORD = "dhzjb"
 BASE_URL = "https://api.siliconflow.cn/v1"
 LOG_FILE = "access_log.csv"
 
 # 页面配置
-st.set_page_config(page_title="Amazon 退款分析 (AI 自动翻译版)", layout="wide")
+st.set_page_config(page_title="Amazon 退款分析 (AI 自动翻译版)", layout="wide", page_icon="📊")
 
-# ================== CSS 隐藏装饰元素 ==================
+# ================== 🔥 【超强力美化 & 去标识化 CSS】 🔥 ==================
+# 这里添加了图案背景和卡片式布局，让应用看起来更专业、独立
 hide_streamlit_elements = """
 <style>
-    /* 隐藏右上角三点菜单 */
-    [data-testid="stMainMenu"] {
-        display: none !important;
-    }
-
-    /* 隐藏右下角 Manage app 按钮 */
-    [data-testid="stToolbar"] {
+    /* --- 1. 隐藏 Streamlit 原生元素 --- */
+    header[data-testid="stHeader"],
+    [data-testid="stAppToolbar"],
+    [data-testid="stDecoration"],
+    footer,
+    [data-testid="stStatusWidget"] {
         display: none !important;
         visibility: hidden !important;
+        height: 0% !important;
+    }
+
+    /* --- 2. 全局背景图案 (遮盖痕迹) --- */
+    /* 给整个页面添加一个淡雅的科技几何纹理背景 */
+    .stApp {
+        background-color: #f0f2f5; /* 基础浅灰背景色 */
+        background-image:  linear-gradient(30deg, #e6e9ef 12%, transparent 12.5%, transparent 87%, #e6e9ef 87.5%, #e6e9ef),
+                           linear-gradient(150deg, #e6e9ef 12%, transparent 12.5%, transparent 87%, #e6e9ef 87.5%, #e6e9ef),
+                           linear-gradient(30deg, #e6e9ef 12%, transparent 12.5%, transparent 87%, #e6e9ef 87.5%, #e6e9ef),
+                           linear-gradient(150deg, #e6e9ef 12%, transparent 12.5%, transparent 87%, #e6e9ef 87.5%, #e6e9ef),
+                           radial-gradient(circle at 50% 50%, #ffffff 15%, #e6e9ef 16%, transparent 17%),
+                           radial-gradient(circle at 50% 50%, #ffffff 15%, #e6e9ef 16%, transparent 17%);
+        background-size: 40px 40px;
+        background-position: 0 0, 0 0, 20px 20px, 20px 20px, 0 0, 20px 20px;
+        opacity: 1;
+    }
+
+    /* --- 3. 主体内容卡片化 --- */
+    /* 将主要内容区域变成一个白色圆角卡片，突出显示 */
+    .block-container {
+        background-color: #ffffff;
+        padding: 3rem 2rem !important; /* 增加内边距 */
+        border-radius: 12px;           /* 圆角 */
+        box-shadow: 0 10px 25px rgba(0,0,0,0.05); /* 柔和的阴影 */
+        margin-top: 2rem !important;   /* 顶部留空 */
+        max-width: 1200px;             /* 限制最大宽度，大屏更精致 */
+    }
+    
+    /* 调整标题样式，使其更像独立应用的 Banner */
+    h1 {
+        color: #2c3e50;
+        text-align: center;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #eaeaea;
+        margin-bottom: 2rem;
     }
 </style>
 """
@@ -87,7 +123,6 @@ def translate_reasons_with_llm(unique_reasons):
             response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content.strip()
-        content = content.replace("```json", "").replace("```", "").strip()
         mapping = json.loads(content)
         return mapping
     except Exception as e:
@@ -177,33 +212,37 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map):
     """
 
 # ================== UI 主逻辑 ==================
-st.title("🤖 Amazon 退款智能分析 (Pro)")
+# 使用表情符号增强标题
+st.title("📊 Amazon 退款智能分析终端 (Pro)")
 
 # ====== 用户信息和管理员日志左右两列显示 ======
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.markdown("### 👤 用户信息登记")
-    st.info("请先填写下方信息，才能进行分析操作。")
+    # st.info("请先填写下方信息，才能进行分析操作。") # 去掉这个提示，界面更清爽
 
     if 'user_name' not in st.session_state: st.session_state.user_name = ""
     if 'user_dept' not in st.session_state: st.session_state.user_dept = ""
 
-    user_name = st.text_input("您的姓名", value=st.session_state.user_name)
-    user_dept = st.text_input("所属部门", value=st.session_state.user_dept)
+    user_name = st.text_input("您的姓名", value=st.session_state.user_name, placeholder="请输入您的姓名")
+    user_dept = st.text_input("所属部门", value=st.session_state.user_dept, placeholder="例如：运营一部")
     st.session_state.user_name = user_name
     st.session_state.user_dept = user_dept
 
 with col2:
-    st.markdown("### 🔐 管理员：查看使用记录")
-    password_input = st.text_input("请输入管理员密码", type="password", key="admin_pwd")
+    st.markdown("### 🔐 管理员入口")
+    password_input = st.text_input("请输入管理员密码", type="password", key="admin_pwd", placeholder="仅管理员可见")
     if password_input == ADMIN_PASSWORD:
         if os.path.exists(LOG_FILE):
             try:
                 log_df = pd.read_csv(LOG_FILE)
-                st.dataframe(log_df, hide_index=True)
+                # st.dataframe(log_df, hide_index=True, height=150) # 稍微限制一下高度
+                with st.expander("查看最近访问日志", expanded=True):
+                     st.dataframe(log_df.tail(5), hide_index=True, use_container_width=True) # 只看最近5条
+
                 csv_data = log_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 导出日志数据 (CSV)", csv_data, "access_log.csv", "text/csv")
+                st.download_button("📥 导出完整日志 (CSV)", csv_data, "access_log.csv", "text/csv", type="primary")
             except:
                 st.error("日志文件读取失败")
         else:
@@ -213,8 +252,21 @@ with col2:
 
 # 用户信息填写完才能上传文件
 if user_name and user_dept:
-    st.caption(f"欢迎，**{user_dept}** 的 **{user_name}**！🚀 已接入 AI 模型: {MODEL_NAME}")
-    uploaded_file = st.file_uploader("📂 请上传 Amazon 退款报告 (CSV)", type="csv")
+    # 使用装饰性分割线代替简单的 st.markdown("---")
+    st.markdown("""
+        <div style="display: flex; align-items: center; margin: 30px 0 20px 0;">
+            <div style="flex-grow: 1; height: 1px; background: linear-gradient(to right, transparent, #ddd, transparent);"></div>
+            <div style="margin: 0 15px; color: #6c5ce7; font-size: 1.2em;">🚀 工作区准备就绪</div>
+            <div style="flex-grow: 1; height: 1px; background: linear-gradient(to right, transparent, #ddd, transparent);"></div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.success(f"欢迎，**{user_dept}** 的 **{user_name}**。已安全连接至 AI 模型: `{MODEL_NAME}`")
+    
+    # 将上传组件放入一个容器中，使其更突出
+    with st.container():
+        st.markdown("#### 📂 数据导入")
+        uploaded_file = st.file_uploader("请上传 Amazon 退款报告 (支持 CSV 格式)", type="csv", help="请确保CSV文件包含 'reason' 和 'sku' 列")
 
     if uploaded_file:
         df = None
@@ -243,18 +295,40 @@ if user_name and user_dept:
             else:
                 r_counts, s_counts, kws, trans_map = result
                 if r_counts is not None:
-                    fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h',
-                                 title="退款原因分布 (中英对照)", text='数量', height=600)
-                    fig.update_layout(xaxis_title="", yaxis_title="")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.divider()
+                    # 结果展示区
+                    st.markdown("### 📊 智能分析仪表盘")
                     
+                    # 使用卡片包裹图表
+                    with st.container():
+                        fig = px.bar(r_counts, x='数量', y='原因_display', orientation='h',
+                                    title="<b>退款原因分布 (中英对照)</b>", text='数量', height=500, 
+                                    color='数量', color_continuous_scale=px.colors.sequential.Teal)
+                        fig.update_layout(xaxis_title="", yaxis_title="", title_x=0, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                        fig.update_traces(textposition='outside')
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.divider()
                     html_report = generate_html_report(df, r_counts, s_counts, kws, trans_map)
-                    st.success("✅ 分析完成！")
-                    st.download_button(
-                        "📥 下载完整 HTML 分析报告",
-                        html_report,
-                        file_name="Amazon_Refund_AI_Report.html",
-                        mime="text/html"
-                    )
+                    
+                    # 下载区域
+                    col_dl1, col_dl2 = st.columns([3,1])
+                    with col_dl1:
+                         st.success("✅ AI 分析已完成！您可以查看上方图表或下载详细报告。")
+                    with col_dl2:
+                        st.download_button(
+                            "📥 下载完整 HTML 报告",
+                            html_report,
+                            file_name="Amazon_Refund_AI_Report.html",
+                            mime="text/html",
+                            type="primary", # 使用主要按钮样式
+                            use_container_width=True
+                        )
 else:
-    st.warning("👈 请先填写【姓名】和【部门】，即可开始使用工具。")
+    # 在未登录状态下显示一个占位提示
+    st.markdown("""
+        <div style="text-align: center; margin-top: 40px; padding: 40px; background: #f8f9fa; border-radius: 10px; color: #666;">
+            <h3>👋 欢迎使用</h3>
+            <p>请在上方左侧填写您的<b>姓名</b>和<b>部门</b>以开始会话。</p>
+        </div>
+    """, unsafe_allow_html=True)
