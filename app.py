@@ -112,11 +112,11 @@ def get_traffic_color(value, min_val, max_val):
         b = int(15 + (60 - 15) * ((ratio - 0.5) * 2))
     return f"#{r:02x}{g:02x}{b:02x}"
 
-# ================== AI 与 数据处理核心逻辑 ==================
+# ================== AI 与 数据处理核心逻辑 (🔥 核心修复) ==================
 def call_llm_translate(text_list, system_prompt):
-    """通用的 LLM 翻译列表函数"""
+    """通用的 LLM 翻译列表函数 (增强健壮性)"""
     client = OpenAI(api_key=SILICONFLOW_API_KEY, base_url=BASE_URL)
-    # 扩大翻译列表长度限制，防止评论过多导致漏翻
+    # 扩大翻译列表长度限制
     if len(text_list) > 100: text_list = text_list[:100]
     
     list_str = json.dumps(text_list)
@@ -124,11 +124,30 @@ def call_llm_translate(text_list, system_prompt):
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "system", "content": system_prompt}, 
-                      {"role": "user", "content": f"Translate specific technical terms/comments to Chinese JSON format (Keep original as Key): {list_str}"}],
+                      {"role": "user", "content": f"Translate specific technical terms/comments to Chinese JSON format (Keep original as Key, Value as translation): {list_str}"}],
             temperature=0.1, response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content.strip())
-    except: return {}
+        content = response.choices[0].message.content.strip()
+        
+        # 🔥 1. 清洗 Markdown 代码块标记 (防止 AI 返回 ```json ... ```)
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[0].strip()
+
+        # 🔥 2. 安全解析
+        result = json.loads(content)
+
+        # 🔥 3. 强制类型检查：必须返回字典，否则返回空字典
+        if isinstance(result, dict):
+            return result
+        else:
+            print("Warning: LLM returned non-dict JSON")
+            return {}
+            
+    except Exception as e:
+        print(f"Translation Error: {e}")
+        return {}
 
 def format_bilingual(text, trans_map, mode='text'):
     text = str(text).strip()
@@ -153,7 +172,7 @@ def process_data(df):
     relevant_comments = []
     if 'customer-comments' in df.columns:
         mask = df['sku'].isin(top_skus)
-        # 关键修复：统一转换为字符串并去除首尾空格，确保key一致
+        # 统一转换为字符串并去除首尾空格
         raw_comments = df[mask]['customer-comments'].dropna().unique().tolist()
         relevant_comments = [str(c).strip() for c in raw_comments if len(str(c)) > 2]
 
@@ -167,13 +186,15 @@ def process_data(df):
         if relevant_comments:
             comment_map = call_llm_translate(relevant_comments, "你是一个亚马逊客服翻译。将列表中的客户抱怨/评论翻译成简练的中文JSON格式，保留原意。")
         
-        # 合并字典
+        # 🔥 双重保险：确保都是字典后再合并
+        if not isinstance(reason_map, dict): reason_map = {}
+        if not isinstance(comment_map, dict): comment_map = {}
+        
         full_trans_map = {**reason_map, **comment_map}
 
     # 5. 构建统计数据
     r_counts = df['reason'].value_counts().reset_index()
     r_counts.columns = ['原因_en', '数量']
-    # 原因列处理时也去除空格
     r_counts['原因_clean'] = r_counts['原因_en'].apply(lambda x: str(x).strip())
     r_counts['原因_display'] = r_counts['原因_clean'].apply(lambda x: format_bilingual(x, full_trans_map, 'text'))
     r_counts['原因_html'] = r_counts['原因_clean'].apply(lambda x: format_bilingual(x, full_trans_map, 'html'))
@@ -230,7 +251,7 @@ def generate_echarts_option(df_counts):
     }
     return option
 
-# ================== HTML 报告生成器 (核心修复区域) ==================
+# ================== HTML 报告生成器 ==================
 def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, echarts_option):
     echarts_json = json.dumps(echarts_option)
     sorted_reasons = reason_counts.sort_values('数量', ascending=False)
@@ -245,7 +266,7 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
             sku_df = df[df['sku'] == sku]
             total = len(sku_df)
             
-            # 使用 clean 过的列进行聚合，防止因为空格导致原因分裂
+            # 使用 clean 过的列进行聚合
             sku_df['reason_clean'] = sku_df['reason'].astype(str).str.strip()
             
             sku_reason = sku_df['reason_clean'].value_counts().reset_index()
@@ -263,10 +284,10 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
                 if comments_list:
                     formatted_comments = []
                     for c in comments_list:
-                        c_str = str(c).strip() # 再次确保去空格
+                        c_str = str(c).strip()
                         c_trans = trans_map.get(c_str)
                         
-                        # 核心修复：强制双语 HTML 结构
+                        # 强制双语 HTML 结构
                         if c_trans and c_trans != c_str:
                             item_html = f"""
                             <div style="margin-bottom: 8px; border-bottom:1px dashed #eee; padding-bottom:4px;">
@@ -322,7 +343,7 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
     <head>
         <meta charset="utf-8">
         <title>Amazon Refund Analysis Report</title>
-        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+        <script src="[https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js](https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js)"></script>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background:#f4f7f6; padding:40px; color:#333; }}
             .container {{ max-width:1200px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
@@ -472,7 +493,7 @@ else:
                     st.markdown("### 📈 退款原因动态分布 (ECharts)")
                     echarts_html_snippet = f"""
                     <div id="chart-container" style="width:100%; height:600px;"></div>
-                    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+                    <script src="[https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js](https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js)"></script>
                     <script>
                         var chart = echarts.init(document.getElementById('chart-container'));
                         var option = {json.dumps(echarts_option)};
