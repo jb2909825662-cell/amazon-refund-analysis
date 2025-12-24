@@ -1,0 +1,19 @@
+name: Sync to ModelScope
+
+on:
+  push:
+    branches: [ main ] # 如果你的主分支叫 master，请改为 master
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Push to ModelScope
+        run: |
+          git remote add modelscope https://${{ secrets.MODELSCOPE_USERNAME }}:${{ secrets.MODELSCOPE_TOKEN }}@www.modelscope.cn/studios/${{ secrets.MODELSCOPE_USERNAME }}/amazon-refund-analysis.git
+          git push -f modelscope main
