@@ -79,9 +79,9 @@ apply_ultra_mask()
 # ================== 初始化状态管理 ==================
 if 'confirmed' not in st.session_state: st.session_state.confirmed = False
 if 'analyzed_history' not in st.session_state: st.session_state.analyzed_history = set()
-if 'admin_access' not in st.session_state: st.session_state.admin_access = False  # 新增：管理员登陆状态
+if 'admin_access' not in st.session_state: st.session_state.admin_access = False 
 
-# ================== 📝 日志系统 (已修正为中国时间) ==================
+# ================== 📝 日志系统 ==================
 def init_log_file():
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, mode='w', newline='', encoding='utf-8-sig') as f:
@@ -90,7 +90,6 @@ def init_log_file():
 def log_action(name, dept, action, note=""):
     try:
         init_log_file()
-        # 🔥 修正点：强制使用 UTC+8 (中国标准时间)
         cst_timezone = datetime.timezone(datetime.timedelta(hours=8))
         current_time = datetime.datetime.now(cst_timezone).strftime("%Y-%m-%d %H:%M:%S")
         
@@ -99,7 +98,7 @@ def log_action(name, dept, action, note=""):
     except Exception as e:
         print(f"日志记录失败: {e}")
 
-# ================== 🎨 颜色算法 (红绿灯渐变) ==================
+# ================== 🎨 颜色算法 ==================
 def get_traffic_color(value, min_val, max_val):
     if max_val == min_val: return "#e74c3c"
     ratio = (value - min_val) / (max_val - min_val)
@@ -114,43 +113,74 @@ def get_traffic_color(value, min_val, max_val):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 # ================== AI 与 数据处理核心逻辑 ==================
-def translate_reasons_with_llm(unique_reasons):
+def call_llm_translate(text_list, system_prompt):
+    """通用的 LLM 翻译列表函数"""
     client = OpenAI(api_key=SILICONFLOW_API_KEY, base_url=BASE_URL)
-    reasons_str = json.dumps(list(unique_reasons))
+    # 扩大翻译列表长度限制，防止评论过多导致漏翻
+    if len(text_list) > 100: text_list = text_list[:100]
+    
+    list_str = json.dumps(text_list)
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[{"role": "system", "content": "你是一个专业的亚马逊翻译助手。"}, 
-                      {"role": "user", "content": f"将以下列表翻译成中文JSON: {reasons_str}"}],
+            messages=[{"role": "system", "content": system_prompt}, 
+                      {"role": "user", "content": f"Translate specific technical terms/comments to Chinese JSON format (Keep original as Key): {list_str}"}],
             temperature=0.1, response_format={"type": "json_object"}
         )
         return json.loads(response.choices[0].message.content.strip())
     except: return {}
 
 def format_bilingual(text, trans_map, mode='text'):
-    text = str(text)
+    text = str(text).strip()
     cn = trans_map.get(text)
-    if cn: return f"{text}<br>({cn})" if mode == 'html' else f"{text} ({cn})"
+    if cn and cn != text: 
+        return f"{text}<br><span style='color:#888;font-size:0.9em'>({cn})</span>" if mode == 'html' else f"{text} ({cn})"
     return text
 
 @st.cache_data(show_spinner=False)
 def process_data(df):
     df.columns = [c.strip() for c in df.columns]
-    unique_reasons = [str(r) for r in df['reason'].dropna().unique()]
     
-    with st.spinner("AI 正在执行语言解析..."):
-        trans_map = translate_reasons_with_llm(unique_reasons)
+    # 1. 提取所有唯一退款原因 (去空格)
+    unique_reasons = [str(r).strip() for r in df['reason'].dropna().unique()]
     
+    # 2. 提前计算 Top 10 SKU
+    sku_counts_raw = df['sku'].value_counts().reset_index().head(12)
+    sku_counts_raw.columns = ['SKU', '退款数量']
+    top_skus = sku_counts_raw['SKU'].tolist()
+    
+    # 3. 提取 Top SKU 相关的唯一客户评论
+    relevant_comments = []
+    if 'customer-comments' in df.columns:
+        mask = df['sku'].isin(top_skus)
+        # 关键修复：统一转换为字符串并去除首尾空格，确保key一致
+        raw_comments = df[mask]['customer-comments'].dropna().unique().tolist()
+        relevant_comments = [str(c).strip() for c in raw_comments if len(str(c)) > 2]
+
+    # 4. 调用 AI
+    with st.spinner("AI 正在解析原因与评论..."):
+        # 翻译原因
+        reason_map = call_llm_translate(unique_reasons, "你是一个亚马逊后台翻译专家。将列表中的退款原因翻译成中文JSON格式。")
+        
+        # 翻译评论
+        comment_map = {}
+        if relevant_comments:
+            comment_map = call_llm_translate(relevant_comments, "你是一个亚马逊客服翻译。将列表中的客户抱怨/评论翻译成简练的中文JSON格式，保留原意。")
+        
+        # 合并字典
+        full_trans_map = {**reason_map, **comment_map}
+
+    # 5. 构建统计数据
     r_counts = df['reason'].value_counts().reset_index()
     r_counts.columns = ['原因_en', '数量']
-    r_counts['原因_display'] = r_counts['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'text'))
-    r_counts['原因_html'] = r_counts['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'html'))
+    # 原因列处理时也去除空格
+    r_counts['原因_clean'] = r_counts['原因_en'].apply(lambda x: str(x).strip())
+    r_counts['原因_display'] = r_counts['原因_clean'].apply(lambda x: format_bilingual(x, full_trans_map, 'text'))
+    r_counts['原因_html'] = r_counts['原因_clean'].apply(lambda x: format_bilingual(x, full_trans_map, 'html'))
     r_counts['占比'] = (r_counts['数量'] / len(df) * 100).round(2)
     r_counts = r_counts.sort_values('数量', ascending=True) 
     
-    sku_counts = df['sku'].value_counts().reset_index().head(12)
-    sku_counts.columns = ['SKU', '退款数量']
-    
+    # 关键词提取
     keywords = []
     if 'customer-comments' in df.columns:
         stop_words = {'the','to','and','a','of','in','is','it','was','for','on','my','i','with','not','returned','item','amazon','unit','nan','this','that','but','have'}
@@ -158,7 +188,7 @@ def process_data(df):
         words = re.findall(r'\w+', text)
         keywords = [w for w in words if w not in stop_words and len(w) > 2]
 
-    return r_counts, sku_counts, Counter(keywords).most_common(12), trans_map
+    return r_counts, sku_counts_raw, Counter(keywords).most_common(12), full_trans_map
 
 # ================== 📊 ECharts 图表构建器 ==================
 def generate_echarts_option(df_counts):
@@ -200,29 +230,87 @@ def generate_echarts_option(df_counts):
     }
     return option
 
-# ================== HTML 报告生成器 ==================
+# ================== HTML 报告生成器 (核心修复区域) ==================
 def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, echarts_option):
     echarts_json = json.dumps(echarts_option)
     sorted_reasons = reason_counts.sort_values('数量', ascending=False)
+    
     reason_rows = "".join([f"<tr><td style='text-align:left'>{r['原因_html']}</td><td>{r['数量']}</td><td>{r['占比']}%</td></tr>" for _, r in sorted_reasons.iterrows()])
 
     sku_tables = ""
     if not sku_counts.empty:
-        # TOP 10 SKU
         top_skus = sku_counts.sort_values('退款数量', ascending=False).head(10)['SKU'].tolist()
         
         for sku in top_skus:
             sku_df = df[df['sku'] == sku]
             total = len(sku_df)
-            sku_reason = sku_df['reason'].value_counts().reset_index()
-            sku_reason.columns = ['原因_en', '频次']
-            sku_reason['原因_html'] = sku_reason['原因_en'].apply(lambda x: format_bilingual(x, trans_map, 'html'))
+            
+            # 使用 clean 过的列进行聚合，防止因为空格导致原因分裂
+            sku_df['reason_clean'] = sku_df['reason'].astype(str).str.strip()
+            
+            sku_reason = sku_df['reason_clean'].value_counts().reset_index()
+            sku_reason.columns = ['原因_clean', '频次']
+            sku_reason['原因_html'] = sku_reason['原因_clean'].apply(lambda x: format_bilingual(x, trans_map, 'html'))
             sku_reason['占比'] = (sku_reason['频次'] / total * 100).round(2)
-            rows = "".join([f"<tr><td style='text-align:left'>{row['原因_html']}</td><td>{row['频次']}</td><td>{row['占比']}%</td></tr>" for _, row in sku_reason.iterrows()])
+            
+            rows_html = ""
+            for _, row in sku_reason.iterrows():
+                r_clean = row['原因_clean']
+                
+                # 提取评论
+                comments_list = sku_df[sku_df['reason_clean'] == r_clean]['customer-comments'].dropna().tolist()
+                
+                if comments_list:
+                    formatted_comments = []
+                    for c in comments_list:
+                        c_str = str(c).strip() # 再次确保去空格
+                        c_trans = trans_map.get(c_str)
+                        
+                        # 核心修复：强制双语 HTML 结构
+                        if c_trans and c_trans != c_str:
+                            item_html = f"""
+                            <div style="margin-bottom: 8px; border-bottom:1px dashed #eee; padding-bottom:4px;">
+                                <span style="color:#333;">• {c_str}</span>
+                                <div style="color:#e67e22; font-size:0.9em; margin-left:12px; margin-top:2px;">
+                                    (CN: {c_trans})
+                                </div>
+                            </div>
+                            """
+                            formatted_comments.append(item_html)
+                        else:
+                            formatted_comments.append(f"<div style='margin-bottom: 6px; border-bottom:1px dashed #eee; padding-bottom:4px;'>• {c_str}</div>")
+                    
+                    comments_html_block = "".join(formatted_comments)
+                    comments_cell = f"<div style='max-height:200px; overflow-y:auto; font-size:12px; line-height:1.4;'>{comments_html_block}</div>"
+                else:
+                    comments_cell = "<span style='color:#ccc'>- 无具体评论 -</span>"
+
+                rows_html += f"""
+                <tr>
+                    <td style='text-align:left; vertical-align:top; width:20%'><b>{row['原因_html']}</b></td>
+                    <td style='text-align:left; vertical-align:top; width:50%; background-color:#fafafa'>{comments_cell}</td>
+                    <td style='vertical-align:top; width:15%'>{row['频次']}</td>
+                    <td style='vertical-align:top; width:15%'>{row['占比']}%</td>
+                </tr>
+                """
+            
             sku_tables += f"""
-            <div style="background:white; padding:15px; border-radius:8px; margin-bottom:20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                <h3 style="margin-top:0;">SKU：{sku} <span style="font-weight:normal; font-size:0.8em; color:#666">（共 {total} 次退款）</span></h3>
-                <table><tr><th style="width:60%">退款原因</th><th>频次</th><th>占比</th></tr>{rows}</table>
+            <div style="background:white; padding:20px; border-radius:12px; margin-bottom:30px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #eee;">
+                <h3 style="margin-top:0; color:#2c3e50; border-bottom:1px solid #eee; padding-bottom:10px;">
+                    📦 SKU：{sku} 
+                    <span style="font-weight:normal; font-size:0.8em; color:#666; float:right">总退款：{total} 单</span>
+                </h3>
+                <table style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>退款原因</th>
+                            <th>客户评论 (Customer Comments)</th>
+                            <th>频次</th>
+                            <th>占比</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows_html}</tbody>
+                </table>
             </div>
             """
 
@@ -237,19 +325,25 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
         <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background:#f4f7f6; padding:40px; color:#333; }}
-            .container {{ max-width:1000px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
+            .container {{ max-width:1200px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
             h1 {{ text-align:center; border-bottom: 2px solid #eee; padding-bottom: 20px; color:#2c3e50; }}
-            h2 {{ margin-top:40px; color:#6c5ce7; border-left:5px solid #6c5ce7; padding-left:12px; }}
-            table {{ width:100%; border-collapse:collapse; margin-top:10px; font-size: 14px; }}
-            th {{ background:#b94136; color:#ffffff; padding:12px; text-align:left; border: none; }}
-            td {{ padding:10px 12px; border-bottom:1px solid #eee; vertical-align: middle; }}
-            .tag {{ display:inline-block; background:#e8f4f8; color:#2980b9; padding:6px 12px; margin:5px; border-radius:4px; }}
+            h2 {{ margin-top:50px; color:#6c5ce7; border-left:5px solid #6c5ce7; padding-left:15px; font-size: 22px; }}
+            table {{ width:100%; border-collapse:collapse; margin-top:10px; font-size: 14px; table-layout: fixed; }}
+            th {{ background:#b94136; color:#ffffff; padding:12px; text-align:left; border: none; font-weight:600; }}
+            td {{ padding:12px; border-bottom:1px solid #eee; word-wrap: break-word; }}
+            .tag {{ display:inline-block; background:#e8f4f8; color:#2980b9; padding:6px 12px; margin:5px; border-radius:4px; font-size:13px; }}
             #main-chart {{ width: 100%; height: 650px; margin-bottom: 40px; border: 1px solid #f0f0f0; border-radius: 8px; padding: 10px; }}
+            
+            /* 滚动条美化 */
+            ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+            ::-webkit-scrollbar-track {{ background: #f1f1f1; }}
+            ::-webkit-scrollbar-thumb {{ background: #c1c1c1; border-radius: 3px; }}
+            ::-webkit-scrollbar-thumb:hover {{ background: #a8a8a8; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>📊 Amazon 退款分析报告 (AI 智能翻译)</h1>
+            <h1>📊 Amazon 退款分析报告 (AI 深度解析版)</h1>
             <h2>1. 可视化分析概览</h2>
             <div id="main-chart"></div>
             <script type="text/javascript">
@@ -260,8 +354,10 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
             </script>
             <h2>2. 全局退款原因分布表</h2>
             <table><tr><th style="width:60%">退款原因 (Original / CN)</th><th>频次</th><th>占比</th></tr>{reason_rows}</table>
-            <h2>3. 重点 SKU 详细分析 (TOP 10)</h2>{sku_tables}
-            <h2>4. 客户评论关键词</h2><div style="line-height:1.6;">{kw_html}</div>
+            <h2>3. 重点 SKU 详细分析 (TOP 10)</h2>
+            <p style="color:#666; font-size:14px; margin-bottom:20px;">* 下表已自动聚合每个SKU在特定退款原因下的具体客户评论，并附带AI中文翻译。</p>
+            {sku_tables}
+            <h2>4. 客户评论高频词云</h2><div style="line-height:1.8;">{kw_html}</div>
         </div>
     </body>
     </html>
@@ -291,30 +387,25 @@ if not st.session_state.confirmed:
                 else:
                     st.warning("⚠️ 请完整填写姓名和部门以继续")
         
-        # ================== 🔐 优化后的管理员区域 ==================
         with col2:
             st.markdown("#### 🔐 管理员权限")
             st.caption("仅限开发者进行日志管理与维护。")
             st.write("")
             
-            # 判断是否已经验证通过
             if not st.session_state.admin_access:
-                # 未验证：显示密码框和验证按钮
                 pwd = st.text_input("管理权证 (Password)", type="password", placeholder="Admin Key", key="admin_pwd_input")
                 
                 if st.button("🔓 验证身份", use_container_width=True):
                     if pwd == ADMIN_PASSWORD:
                         st.session_state.admin_access = True
-                        st.rerun() # 刷新页面进入已验证状态
+                        st.rerun() 
                     else:
                         st.error("🚫 权限拒绝：密码错误")
             else:
-                # 已验证：显示下载界面
                 st.markdown("<style>.terminal-shield{display:none !important;}</style>", unsafe_allow_html=True)
                 st.success("✅ 管理员身份已验证")
                 
                 if os.path.exists(LOG_FILE):
-                    # 读取CSV生成下载内容
                     df_log = pd.read_csv(LOG_FILE)
                     csv_data = df_log.to_csv(index=False).encode('utf-8-sig')
                     
@@ -363,17 +454,14 @@ else:
             if df is not None:
                 st.success(f"数据已载入：`{up_file.name}` (共 {len(df)} 条记录)")
                 
-                # 🔥 移动日志逻辑：确保只有点击分析后才记录，且不重复
                 if st.button("📊 执行深度 AI 分析"):
                     with st.status("正在建立安全加密连接...", expanded=True) as status:
                         st.write("正在识别数据维度...")
-                        st.write(f"正在调用 {MODEL_NAME} 进行双语翻译建模...")
+                        st.write(f"正在调用 {MODEL_NAME} 进行双语翻译建模（包含原因与评论）...")
                         r_counts, sku_counts, keywords, trans_map = process_data(df)
                         st.write("正在构建 ECharts 动态可视化...")
                         echarts_option = generate_echarts_option(r_counts)
                         
-                        # === 日志记录点 (只记录一次) ===
-                        # 使用 文件名+文件大小 作为唯一标识
                         file_signature = f"{up_file.name}_{up_file.size}"
                         if file_signature not in st.session_state.analyzed_history:
                             log_action(st.session_state.user_name, st.session_state.user_dept, "执行分析任务", up_file.name)
