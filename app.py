@@ -15,6 +15,8 @@ MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
 ADMIN_PASSWORD = "dhzjb" 
 BASE_URL = "https://api.siliconflow.cn/v1"
 LOG_FILE = "access_log.csv"
+# 🔥 修复点：更换为国内稳定 CDN 源
+ECHARTS_CDN = "https://lib.baomitu.com/echarts/5.4.3/echarts.min.js"
 
 # 页面配置
 st.set_page_config(page_title="Amazon 智能分析终端", layout="wide", page_icon="🛡️")
@@ -148,7 +150,7 @@ def format_bilingual(text, trans_map, mode='text'):
     text = str(text).strip()
     cn = trans_map.get(text)
     if cn and cn != text: 
-        # 🔥 修改点：移除了 font-size: 0.9em，确保中英文字体大小一致
+        # 🔥 确保字体一致，只改变颜色
         return f"{text}<br><span style='color:#666'>({cn})</span>" if mode == 'html' else f"{text} ({cn})"
     return text
 
@@ -326,7 +328,7 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
     <head>
         <meta charset="utf-8">
         <title>Amazon Refund Analysis Report</title>
-        <script src="[https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js](https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js)"></script>
+        <script src="{ECHARTS_CDN}"></script>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background:#f4f7f6; padding:40px; color:#333; }}
             .container {{ max-width:1200px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
@@ -355,7 +357,7 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
                 window.addEventListener('load', function() {{
                     try {{
                         if (typeof echarts === 'undefined') {{
-                            document.getElementById('main-chart').innerHTML = '<p style="color:red; text-align:center; padding-top:100px;">❌ 无法连接到图表服务器，请检查网络连接。</p>';
+                            document.getElementById('main-chart').innerHTML = '<p style="color:red; text-align:center; padding-top:100px;">❌ 无法连接到图表服务器，请检查网络（尝试刷新或更换网络环境）。</p>';
                             return;
                         }}
                         var myChart = echarts.init(document.getElementById('main-chart'));
@@ -487,9 +489,10 @@ else:
                         status.update(label="✅ 分析引擎处理完成", state="complete", expanded=False)
                     
                     st.markdown("### 📈 退款原因动态分布 (ECharts)")
+                    # 🔥 修复点：页面预览也使用新 CDN
                     echarts_html_snippet = f"""
                     <div id="chart-container" style="width:100%; height:600px;"></div>
-                    <script src="[https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js](https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js)"></script>
+                    <script src="{ECHARTS_CDN}"></script>
                     <script>
                         var chart = echarts.init(document.getElementById('chart-container'));
                         var option = {json.dumps(echarts_option)};
