@@ -79,6 +79,7 @@ apply_ultra_mask()
 # ================== 初始化状态管理 ==================
 if 'confirmed' not in st.session_state: st.session_state.confirmed = False
 if 'analyzed_history' not in st.session_state: st.session_state.analyzed_history = set()
+if 'admin_access' not in st.session_state: st.session_state.admin_access = False  # 新增：管理员登陆状态
 
 # ================== 📝 日志系统 (已修正为中国时间) ==================
 def init_log_file():
@@ -289,16 +290,49 @@ if not st.session_state.confirmed:
                     st.rerun()
                 else:
                     st.warning("⚠️ 请完整填写姓名和部门以继续")
+        
+        # ================== 🔐 优化后的管理员区域 ==================
         with col2:
             st.markdown("#### 🔐 管理员权限")
             st.caption("仅限开发者进行日志管理与维护。")
             st.write("")
-            pwd = st.text_input("管理权证 (Password)", type="password", placeholder="Admin Key")
-            if pwd == ADMIN_PASSWORD:
+            
+            # 判断是否已经验证通过
+            if not st.session_state.admin_access:
+                # 未验证：显示密码框和验证按钮
+                pwd = st.text_input("管理权证 (Password)", type="password", placeholder="Admin Key", key="admin_pwd_input")
+                
+                if st.button("🔓 验证身份", use_container_width=True):
+                    if pwd == ADMIN_PASSWORD:
+                        st.session_state.admin_access = True
+                        st.rerun() # 刷新页面进入已验证状态
+                    else:
+                        st.error("🚫 权限拒绝：密码错误")
+            else:
+                # 已验证：显示下载界面
                 st.markdown("<style>.terminal-shield{display:none !important;}</style>", unsafe_allow_html=True)
                 st.success("✅ 管理员身份已验证")
+                
                 if os.path.exists(LOG_FILE):
-                    st.download_button("📥 导出全量访问日志", pd.read_csv(LOG_FILE).to_csv(index=False).encode('utf-8-sig'), "access_log.csv", "text/csv")
+                    # 读取CSV生成下载内容
+                    df_log = pd.read_csv(LOG_FILE)
+                    csv_data = df_log.to_csv(index=False).encode('utf-8-sig')
+                    
+                    st.download_button(
+                        label="📥 导出全量访问日志",
+                        data=csv_data,
+                        file_name="access_log.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("暂无日志文件")
+                
+                st.write("")
+                if st.button("🔒 退出管理", type="secondary", use_container_width=True):
+                    st.session_state.admin_access = False
+                    st.rerun()
+
         st.markdown("</div>", unsafe_allow_html=True)
 else:
     with st.container():
