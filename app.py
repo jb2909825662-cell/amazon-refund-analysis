@@ -112,11 +112,10 @@ def get_traffic_color(value, min_val, max_val):
         b = int(15 + (60 - 15) * ((ratio - 0.5) * 2))
     return f"#{r:02x}{g:02x}{b:02x}"
 
-# ================== AI 与 数据处理核心逻辑 (🔥 核心修复) ==================
+# ================== AI 与 数据处理核心逻辑 ==================
 def call_llm_translate(text_list, system_prompt):
-    """通用的 LLM 翻译列表函数 (增强健壮性)"""
+    """通用的 LLM 翻译列表函数"""
     client = OpenAI(api_key=SILICONFLOW_API_KEY, base_url=BASE_URL)
-    # 扩大翻译列表长度限制
     if len(text_list) > 100: text_list = text_list[:100]
     
     list_str = json.dumps(text_list)
@@ -129,20 +128,16 @@ def call_llm_translate(text_list, system_prompt):
         )
         content = response.choices[0].message.content.strip()
         
-        # 🔥 1. 清洗 Markdown 代码块标记 (防止 AI 返回 ```json ... ```)
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
             content = content.split("```")[0].strip()
 
-        # 🔥 2. 安全解析
         result = json.loads(content)
 
-        # 🔥 3. 强制类型检查：必须返回字典，否则返回空字典
         if isinstance(result, dict):
             return result
         else:
-            print("Warning: LLM returned non-dict JSON")
             return {}
             
     except Exception as e:
@@ -153,46 +148,38 @@ def format_bilingual(text, trans_map, mode='text'):
     text = str(text).strip()
     cn = trans_map.get(text)
     if cn and cn != text: 
-        return f"{text}<br><span style='color:#888;font-size:0.9em'>({cn})</span>" if mode == 'html' else f"{text} ({cn})"
+        # 🔥 修改点：移除了 font-size: 0.9em，确保中英文字体大小一致
+        return f"{text}<br><span style='color:#666'>({cn})</span>" if mode == 'html' else f"{text} ({cn})"
     return text
 
 @st.cache_data(show_spinner=False)
 def process_data(df):
     df.columns = [c.strip() for c in df.columns]
     
-    # 1. 提取所有唯一退款原因 (去空格)
     unique_reasons = [str(r).strip() for r in df['reason'].dropna().unique()]
     
-    # 2. 提前计算 Top 10 SKU
     sku_counts_raw = df['sku'].value_counts().reset_index().head(12)
     sku_counts_raw.columns = ['SKU', '退款数量']
     top_skus = sku_counts_raw['SKU'].tolist()
     
-    # 3. 提取 Top SKU 相关的唯一客户评论
     relevant_comments = []
     if 'customer-comments' in df.columns:
         mask = df['sku'].isin(top_skus)
-        # 统一转换为字符串并去除首尾空格
         raw_comments = df[mask]['customer-comments'].dropna().unique().tolist()
         relevant_comments = [str(c).strip() for c in raw_comments if len(str(c)) > 2]
 
-    # 4. 调用 AI
     with st.spinner("AI 正在解析原因与评论..."):
-        # 翻译原因
         reason_map = call_llm_translate(unique_reasons, "你是一个亚马逊后台翻译专家。将列表中的退款原因翻译成中文JSON格式。")
         
-        # 翻译评论
         comment_map = {}
         if relevant_comments:
             comment_map = call_llm_translate(relevant_comments, "你是一个亚马逊客服翻译。将列表中的客户抱怨/评论翻译成简练的中文JSON格式，保留原意。")
         
-        # 🔥 双重保险：确保都是字典后再合并
         if not isinstance(reason_map, dict): reason_map = {}
         if not isinstance(comment_map, dict): comment_map = {}
         
         full_trans_map = {**reason_map, **comment_map}
 
-    # 5. 构建统计数据
     r_counts = df['reason'].value_counts().reset_index()
     r_counts.columns = ['原因_en', '数量']
     r_counts['原因_clean'] = r_counts['原因_en'].apply(lambda x: str(x).strip())
@@ -201,7 +188,6 @@ def process_data(df):
     r_counts['占比'] = (r_counts['数量'] / len(df) * 100).round(2)
     r_counts = r_counts.sort_values('数量', ascending=True) 
     
-    # 关键词提取
     keywords = []
     if 'customer-comments' in df.columns:
         stop_words = {'the','to','and','a','of','in','is','it','was','for','on','my','i','with','not','returned','item','amazon','unit','nan','this','that','but','have'}
@@ -266,7 +252,6 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
             sku_df = df[df['sku'] == sku]
             total = len(sku_df)
             
-            # 使用 clean 过的列进行聚合
             sku_df['reason_clean'] = sku_df['reason'].astype(str).str.strip()
             
             sku_reason = sku_df['reason_clean'].value_counts().reset_index()
@@ -278,7 +263,6 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
             for _, row in sku_reason.iterrows():
                 r_clean = row['原因_clean']
                 
-                # 提取评论
                 comments_list = sku_df[sku_df['reason_clean'] == r_clean]['customer-comments'].dropna().tolist()
                 
                 if comments_list:
@@ -287,12 +271,11 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
                         c_str = str(c).strip()
                         c_trans = trans_map.get(c_str)
                         
-                        # 强制双语 HTML 结构
                         if c_trans and c_trans != c_str:
                             item_html = f"""
                             <div style="margin-bottom: 8px; border-bottom:1px dashed #eee; padding-bottom:4px;">
                                 <span style="color:#333;">• {c_str}</span>
-                                <div style="color:#e67e22; font-size:0.9em; margin-left:12px; margin-top:2px;">
+                                <div style="color:#e67e22; margin-left:12px; margin-top:2px;">
                                     (CN: {c_trans})
                                 </div>
                             </div>
@@ -366,13 +349,26 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
         <div class="container">
             <h1>📊 Amazon 退款分析报告 (AI 深度解析版)</h1>
             <h2>1. 可视化分析概览</h2>
-            <div id="main-chart"></div>
+            <div id="main-chart">Loading Chart...</div>
+            
             <script type="text/javascript">
-                var myChart = echarts.init(document.getElementById('main-chart'));
-                var option = {echarts_json};
-                myChart.setOption(option);
-                window.addEventListener('resize', function() {{ myChart.resize(); }});
+                window.addEventListener('load', function() {{
+                    try {{
+                        if (typeof echarts === 'undefined') {{
+                            document.getElementById('main-chart').innerHTML = '<p style="color:red; text-align:center; padding-top:100px;">❌ 无法连接到图表服务器，请检查网络连接。</p>';
+                            return;
+                        }}
+                        var myChart = echarts.init(document.getElementById('main-chart'));
+                        var option = {echarts_json};
+                        myChart.setOption(option);
+                        window.addEventListener('resize', function() {{ myChart.resize(); }});
+                    }} catch (e) {{
+                        console.error("Chart Error:", e);
+                        document.getElementById('main-chart').innerHTML = '<p>图表加载失败。</p>';
+                    }}
+                }});
             </script>
+            
             <h2>2. 全局退款原因分布表</h2>
             <table><tr><th style="width:60%">退款原因 (Original / CN)</th><th>频次</th><th>占比</th></tr>{reason_rows}</table>
             <h2>3. 重点 SKU 详细分析 (TOP 10)</h2>
