@@ -2,7 +2,7 @@ name: Sync to ModelScope
 
 on:
   push:
-    branches: [ main ] # 如果你的主分支叫 master，请改为 master
+    branches: [ main ] # 确保这是你的主分支名
 
 jobs:
   sync:
@@ -14,6 +14,17 @@ jobs:
           fetch-depth: 0
 
       - name: Push to ModelScope
+        env:
+          MS_USERNAME: ${{ secrets.MODELSCOPE_USERNAME }}
+          MS_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
         run: |
-          git remote add modelscope https://${{ secrets.MODELSCOPE_USERNAME }}:${{ secrets.MODELSCOPE_TOKEN }}@www.modelscope.cn/studios/${{ secrets.MODELSCOPE_USERNAME }}/amazon-refund-analysis.git
+          # 1. 显式设置 Git 用户信息（防止魔搭拒绝匿名提交）
+          git config --global user.email "sync@example.com"
+          git config --global user.name "GithubSync"
+          
+          # 2. 使用环境变量拼接 URL，避免特殊字符导致的解析错误
+          # 注意：这里的 amazon-refund-analysis 请务必确认与魔搭上的英文名一致
+          git remote add modelscope "https://${MS_USERNAME}:${MS_TOKEN}@www.modelscope.cn/studios/${MS_USERNAME}/amazon-refund-analysis.git"
+          
+          # 3. 强制推送
           git push -f modelscope main
