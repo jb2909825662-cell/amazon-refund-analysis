@@ -16,7 +16,7 @@ ADMIN_PASSWORD = "dhzjb"
 BASE_URL = "https://api.siliconflow.cn/v1"
 LOG_FILE = "access_log.csv"
 # 🔥 修复点：更换为国内稳定 CDN 源
-ECHARTS_CDN = "https://cdn.staticfile.net/echarts/5.4.3/echarts.min.js"
+ECHARTS_CDN = "https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"
 
 # 页面配置
 st.set_page_config(page_title="Amazon 智能分析终端", layout="wide", page_icon="🛡️")
@@ -519,4 +519,5 @@ else:
         
         st.markdown("</div>", unsafe_allow_html=True)
 st.write(""); st.write("")
+
 
