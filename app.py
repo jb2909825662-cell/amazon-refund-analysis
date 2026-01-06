@@ -354,7 +354,7 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
     <head>
         <meta charset="utf-8">
         <title>Amazon Refund Analysis Report</title>
-        <script src="{ECHARTS_CDN}"></script>
+        <script src="{ECHARTS_CDN}" onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js';"></script>
         <style>
             body {{ font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background:#f4f7f6; padding:40px; color:#333; }}
             .container {{ max-width:1200px; margin:auto; background:white; padding:40px; border-radius:12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }}
@@ -377,10 +377,21 @@ def generate_html_report(df, reason_counts, sku_counts, keywords, trans_map, ech
             <h2>1. 可视化分析概览</h2>
             <div id="main-chart"></div>
             <script type="text/javascript">
-                var myChart = echarts.init(document.getElementById('main-chart'));
-                var option = {echarts_json};
-                myChart.setOption(option);
-                window.addEventListener('resize', function() {{ myChart.resize(); }});
+                function initMainChart() {{
+                    if (typeof echarts !== 'undefined') {{
+                        var myChart = echarts.init(document.getElementById('main-chart'));
+                        var option = {echarts_json};
+                        myChart.setOption(option);
+                        window.addEventListener('resize', function() {{ myChart.resize(); }});
+                    }} else {{
+                        setTimeout(initMainChart, 100);
+                    }}
+                }}
+                if (document.readyState === 'loading') {{
+                    document.addEventListener('DOMContentLoaded', initMainChart);
+                }} else {{
+                    setTimeout(initMainChart, 200);
+                }}
             </script>
             
             <h2>2. 全局退款原因分布表</h2>
@@ -452,15 +463,43 @@ else:
         up_file = st.file_uploader("请拖拽或选择 CSV 文件", type="csv")
         
         if up_file:
-            try:
-                df = pd.read_csv(up_file)
-            except:
-                try: df = pd.read_csv(up_file, encoding='gbk')
-                except: df = pd.DataFrame()
+            # 重置文件指针，确保可以多次读取
+            up_file.seek(0)
+            
+            with st.spinner("正在读取文件..."):
+                try:
+                    df = pd.read_csv(up_file)
+                    encoding_used = "utf-8"
+                except Exception as e1:
+                    try: 
+                        up_file.seek(0)
+                        df = pd.read_csv(up_file, encoding='gbk')
+                        encoding_used = "gbk"
+                    except Exception as e2:
+                        st.error(f"❌ 文件读取失败！尝试了 UTF-8 和 GBK 编码均失败。\n错误信息: {str(e2)}")
+                        df = pd.DataFrame()
+                        encoding_used = None
             
             if not df.empty:
-                st.success(f"已载入 {len(df)} 条记录")
-                if st.button("📊 执行 AI 深度分析 (含重试保障)"):
+                st.success(f"✅ 已载入 {len(df)} 条记录，{len(df.columns)} 个字段")
+                
+                # 显示文件基本信息
+                with st.expander("📋 查看文件基本信息", expanded=False):
+                    st.write(f"**文件名称:** {up_file.name}")
+                    st.write(f"**文件大小:** {up_file.size / 1024:.2f} KB")
+                    st.write(f"**使用编码:** {encoding_used}")
+                    st.write(f"**数据列:** {', '.join(df.columns.tolist()[:10])}{'...' if len(df.columns) > 10 else ''}")
+                    st.dataframe(df.head(3), use_container_width=True)
+                
+                # 检查必需的列
+                required_cols = ['reason', 'sku']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                if missing_cols:
+                    st.warning(f"⚠️ 警告：缺少必需的列 {missing_cols}，分析可能无法正常进行。请检查 CSV 文件格式。")
+                else:
+                    st.info("✅ 文件格式检查通过，包含必需的字段")
+                
+                if st.button("📊 执行 AI 深度分析 (含重试保障)", type="primary", use_container_width=True):
                     with st.status("🚀 正在启动分析引擎...", expanded=True) as status:
                         st.write("📡 连接 AI 翻译接口 (自动重试模式)...")
                         r_counts, sku_counts, keywords, trans_map = process_data(df)
@@ -471,16 +510,35 @@ else:
                         log_action(st.session_state.user_name, st.session_state.user_dept, "分析完成", up_file.name)
                         status.update(label="✅ 分析完成！", state="complete", expanded=False)
                     
-                    # 预览图表
+                    # 预览图表 - 修复加载问题
                     echarts_html = f"""
                     <div id="chart" style="width:100%;height:500px;"></div>
-                    <script src="{ECHARTS_CDN}"></script>
-                    <script>echarts.init(document.getElementById('chart')).setOption({json.dumps(echarts_option)})</script>
+                    <script src="{ECHARTS_CDN}" onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js';"></script>
+                    <script type="text/javascript">
+                        function initChart() {{
+                            if (typeof echarts !== 'undefined') {{
+                                var myChart = echarts.init(document.getElementById('chart'));
+                                var option = {json.dumps(echarts_option)};
+                                myChart.setOption(option);
+                                window.addEventListener('resize', function() {{ myChart.resize(); }});
+                            }} else {{
+                                setTimeout(initChart, 100);
+                            }}
+                        }}
+                        if (document.readyState === 'loading') {{
+                            document.addEventListener('DOMContentLoaded', initChart);
+                        }} else {{
+                            setTimeout(initChart, 200);
+                        }}
+                    </script>
                     """
                     components.html(echarts_html, height=520)
                     
                     # 生成报告
                     html_report = generate_html_report(df, r_counts, sku_counts, keywords, trans_map, echarts_option)
                     st.download_button("📥 下载完整 HTML 报告 (中英对照版)", html_report, "Amazon_Report_Pro.html", "text/html", type="primary")
+            else:
+                st.error("❌ 文件读取失败或文件为空，请检查文件格式是否正确。")
 
         st.markdown("</div>", unsafe_allow_html=True)
+
